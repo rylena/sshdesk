@@ -20,11 +20,20 @@ from sshdesk.session.terminal_state import TerminalState
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _terminal_attributes(fd: int):
+    attributes = termios.tcgetattr(fd)
+    # Darwin may set PENDIN after queued input is consumed. It is kernel state,
+    # not a raw-mode setting owned by SSHDESK.
+    if hasattr(termios, "PENDIN"):
+        attributes[3] &= ~termios.PENDIN
+    return attributes
+
+
 class LifecycleTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "POSIX terminal test")
     def test_terminal_restored_after_exception(self) -> None:
         master, slave = pty.openpty()
-        before = termios.tcgetattr(slave)
+        before = _terminal_attributes(slave)
         writer = TerminalWriter(
             TerminalCapabilities("test", ColorMode.ANSI256, True, True, True)
         )
@@ -33,7 +42,7 @@ class LifecycleTests(unittest.TestCase):
                 slave, slave, writer
             ):
                 raise RuntimeError("simulated crash")
-            self.assertEqual(termios.tcgetattr(slave), before)
+            self.assertEqual(_terminal_attributes(slave), before)
         finally:
             os.close(slave)
             os.close(master)
@@ -42,7 +51,7 @@ class LifecycleTests(unittest.TestCase):
     def test_plain_pty_session_detaches_and_restores(self) -> None:
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-        before = termios.tcgetattr(slave)
+        before = _terminal_attributes(slave)
         environment = {
             **os.environ,
             "PYTHONPATH": str(ROOT / "src"),
@@ -98,7 +107,7 @@ class LifecycleTests(unittest.TestCase):
                 except OSError:
                     break
             self.assertIn(b"\x1b[?1049l", output)
-            self.assertEqual(termios.tcgetattr(slave), before)
+            self.assertEqual(_terminal_attributes(slave), before)
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -112,7 +121,7 @@ class LifecycleTests(unittest.TestCase):
     def test_kitty_probe_selects_real_pixel_session(self) -> None:
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 12, 40, 0, 0))
-        before = termios.tcgetattr(slave)
+        before = _terminal_attributes(slave)
         environment = {
             **os.environ,
             "PYTHONPATH": str(ROOT / "src"),
@@ -160,6 +169,11 @@ class LifecycleTests(unittest.TestCase):
             self.assertIn(b"o=z", output)
             self.assertIn(b"\x1b[?1016h", output)
             os.write(master, b"\x1d\x1d")
+            deadline = time.monotonic() + 5
+            while process.poll() is None and time.monotonic() < deadline:
+                ready, _, _ = select.select((master,), (), (), 0.1)
+                if ready:
+                    output.extend(os.read(master, 65536))
             self.assertEqual(process.wait(timeout=5), 0, process.stderr.read().decode())
             while True:
                 ready, _, _ = select.select((master,), (), (), 0)
@@ -171,7 +185,7 @@ class LifecycleTests(unittest.TestCase):
                     break
             self.assertIn(b"\x1b_Ga=d,d=A,q=2", output)
             self.assertIn(b"\x1b[?1016l", output)
-            self.assertEqual(termios.tcgetattr(slave), before)
+            self.assertEqual(_terminal_attributes(slave), before)
         finally:
             if process.poll() is None:
                 process.terminate()
