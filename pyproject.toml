@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sshdesk"
+version = "0.1.0"
+description = "A full interactive remote desktop delivered entirely through SSH"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+  "Pillow>=9.0",
+  "python-xlib>=0.33; platform_system == 'Linux'",
+]
+
+[project.urls]
+Homepage = "https://github.com/rylena/sshdesk"
+Repository = "https://github.com/rylena/sshdesk.git"
+Issues = "https://github.com/rylena/sshdesk/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+fast = ["numpy>=1.24", "opencv-python-headless>=4.8"]
+
+[project.scripts]
+sshdesk = "sshdesk.cli:main"
+sshdesk-local = "sshdesk.cli:local_main"
+sshdesk-server = "sshdesk.cli:server_main"
+sshdesk-bench = "sshdesk.cli:bench_main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

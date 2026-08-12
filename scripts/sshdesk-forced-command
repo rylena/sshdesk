@@ -1,0 +1,49 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${SSH_ORIGINAL_COMMAND-}" ]; then
+    echo "This account only accepts interactive SSHDESK sessions." >&2
+    exit 126
+fi
+
+if [ ! -t 0 ] || [ ! -t 1 ]; then
+    echo "SSHDESK requires an interactive SSH terminal (PTY)." >&2
+    exit 1
+fi
+
+# Read only fixed keys from a root-owned per-account file. Nothing is evaluated.
+account="$(id -un)"
+config="/etc/sshdesk/${account}.conf"
+if [ -r "${config}" ]; then
+    while IFS='=' read -r key value; do
+        case "${key}" in
+            DISPLAY) DISPLAY="${value}" ;;
+            XAUTHORITY) XAUTHORITY="${value}" ;;
+            RUN_AS) RUN_AS="${value}" ;;
+            SSHDESK_RENDER) SSHDESK_RENDER="${value}" ;;
+            SSHDESK_COLOR) SSHDESK_COLOR="${value}" ;;
+            SSHDESK_MOUSE) SSHDESK_MOUSE="${value}" ;;
+            SSHDESK_UNICODE) SSHDESK_UNICODE="${value}" ;;
+            SSHDESK_X11_CAPTURE) SSHDESK_X11_CAPTURE="${value}" ;;
+        esac
+    done < "${config}"
+fi
+
+: "${DISPLAY:=:0}"
+: "${XAUTHORITY:=${HOME}/.Xauthority}"
+: "${RUN_AS:=${account}}"
+case "${RUN_AS}" in
+    *[!A-Za-z0-9_.-]*|'') echo "Invalid SSHDESK desktop account." >&2; exit 1 ;;
+esac
+export DISPLAY XAUTHORITY
+export SSHDESK_RENDER="${SSHDESK_RENDER-auto}"
+export SSHDESK_COLOR="${SSHDESK_COLOR-auto}"
+export SSHDESK_MOUSE="${SSHDESK_MOUSE-auto}"
+export SSHDESK_UNICODE="${SSHDESK_UNICODE-auto}"
+export SSHDESK_X11_CAPTURE="${SSHDESK_X11_CAPTURE-auto}"
+
+if [ "${RUN_AS}" != "${account}" ]; then
+    exec /usr/bin/sudo -n -u "${RUN_AS}" -- /usr/local/bin/sshdesk-server
+fi
+
+exec /usr/local/bin/sshdesk-server
