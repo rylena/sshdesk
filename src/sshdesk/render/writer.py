@@ -33,12 +33,25 @@ class TerminalWriter:
         (255, 255, 255),
     )
 
-    def __init__(self, capabilities: TerminalCapabilities | None = None) -> None:
+    def __init__(
+        self,
+        capabilities: TerminalCapabilities | None = None,
+        title: str = "SSHDESK",
+    ) -> None:
         self.capabilities = capabilities or TerminalCapabilities.detect()
         self._active = False
+        self.title = "".join(character for character in title if character.isprintable())[:255]
 
     def close(self) -> None:
         """Release optional encoder resources."""
+
+    def _title_enter(self) -> str:
+        # Xterm's title stack lets SSHDESK restore the client's previous title.
+        return CSI + "22;0t" + f"\x1b]2;{self.title}\x1b\\"
+
+    @staticmethod
+    def _title_leave() -> str:
+        return CSI + "23;0t"
 
     @staticmethod
     @lru_cache(maxsize=4096)
@@ -107,7 +120,17 @@ class TerminalWriter:
 
     def enter(self) -> bytes:
         self._active = True
-        value = CSI + "?1049h" + CSI + "?25l" + CSI + "2J" + CSI + "H"
+        value = (
+            self._title_enter()
+            + CSI
+            + "?1049h"
+            + CSI
+            + "?25l"
+            + CSI
+            + "2J"
+            + CSI
+            + "H"
+        )
         if self.capabilities.mouse:
             value += CSI + "?1003h"
             if self.capabilities.sgr_mouse:
@@ -127,7 +150,15 @@ class TerminalWriter:
             + "?1003l"
             + CSI
             + "?1049l"
+            + self._title_leave()
         ).encode()
+
+    def header(self, width: int) -> bytes:
+        width = max(1, width)
+        label = f" SSHDESK | {self.title.removeprefix('SSHDESK - ')} "
+        line = label[:width].center(width)
+        _, escape, _ = self._cell_style((235, 240, 248), (28, 38, 52))
+        return f"{CSI}1;1H{escape}{line}{CSI}0m".encode()
 
     def full(self, frame: RenderedFrame) -> bytes:
         output = io.StringIO()
@@ -215,7 +246,7 @@ class TerminalWriter:
         width = stats.terminal_width or 80
         height = stats.terminal_height or 24
         _, overlay_escape, _ = self._cell_style((255, 255, 255), (22, 28, 38))
-        for row, line in enumerate(lines[:height], 1):
+        for row, line in enumerate(lines[: max(0, height - 1)], 2):
             output.write(f"{CSI}{row};1H{overlay_escape}{line[:width]}")
         output.write(CSI + "0m")
         return output.getvalue().encode()

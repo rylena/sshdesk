@@ -10,29 +10,41 @@ from .base import Cell, FrameUpdate, RenderedFrame, Renderer, UpdateKind, Viewpo
 class TerminalRenderer(Renderer):
     """Render two vertical RGB pixels per terminal cell using Unicode half blocks."""
 
-    def __init__(self, delta_full_threshold: float = 0.60) -> None:
+    def __init__(self, delta_full_threshold: float = 0.60, top_margin: int = 0) -> None:
         self.delta_full_threshold = delta_full_threshold
+        if not 0 <= top_margin <= 16:
+            raise ValueError("renderer top margin must be between 0 and 16")
+        self.top_margin = top_margin
 
     @staticmethod
     def calculate_viewport(
-        desktop_width: int, desktop_height: int, columns: int, rows: int
+        desktop_width: int,
+        desktop_height: int,
+        columns: int,
+        rows: int,
+        top_margin: int = 0,
     ) -> Viewport:
         if not 1 <= columns <= 1024 or not 1 <= rows <= 1024:
             raise ValueError("terminal dimensions must be between 1 and 1024")
         if desktop_width <= 0 or desktop_height <= 0:
             raise ValueError("desktop dimensions must be positive")
 
+        # Keep at least one content row on unusually small terminals.
+        margin = min(top_margin, max(0, rows - 1))
+        content_rows = rows - margin
         # A terminal cell is represented by two vertical source pixels.
-        scale = min(columns / desktop_width, (rows * 2) / desktop_height)
+        scale = min(columns / desktop_width, (content_rows * 2) / desktop_height)
         pixel_width = max(1, min(columns, round(desktop_width * scale)))
-        pixel_height = max(2, min(rows * 2, round(desktop_height * scale)))
+        pixel_height = max(2, min(content_rows * 2, round(desktop_height * scale)))
         cell_height = max(1, (pixel_height + 1) // 2)
         x = (columns - pixel_width) // 2
-        y = (rows - cell_height) // 2
+        y = margin + (content_rows - cell_height) // 2
         return Viewport(x, y, pixel_width, cell_height, desktop_width, desktop_height)
 
     def render(self, frame: Frame, width: int, height: int) -> RenderedFrame:
-        viewport = self.calculate_viewport(frame.width, frame.height, width, height)
+        viewport = self.calculate_viewport(
+            frame.width, frame.height, width, height, self.top_margin
+        )
         image_height = viewport.height * 2
         target = (viewport.width, image_height)
         if frame.image.mode == "RGB" and frame.image.size == target:
@@ -58,7 +70,9 @@ class TerminalRenderer(Renderer):
         width: int,
         height: int,
     ) -> tuple[int, int]:
-        viewport = self.calculate_viewport(desktop_width, desktop_height, width, height)
+        viewport = self.calculate_viewport(
+            desktop_width, desktop_height, width, height, self.top_margin
+        )
         return viewport.width, viewport.height * 2
 
     def diff(

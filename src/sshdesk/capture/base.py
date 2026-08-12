@@ -18,6 +18,7 @@ class Frame:
     captured_ns: int
     desktop_width: int | None = None
     desktop_height: int | None = None
+    content_digest: bytes | None = None
 
     @property
     def width(self) -> int:

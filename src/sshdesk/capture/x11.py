@@ -91,8 +91,8 @@ class X11Capture(ScreenCapture):
             )
             self._ffmpeg.set_target_size(*(self._target_size or self._desktop_size))
             self._ffmpeg.set_frame_rate(self._frames_per_second)
-        image, captured_ns = self._ffmpeg.capture()
-        return Frame(image, captured_ns, *self._desktop_size)
+        image, captured_ns, digest = self._ffmpeg.capture()
+        return Frame(image, captured_ns, *self._desktop_size, digest)
 
     def _close_shared(self) -> None:
         if self._shared is not None:
@@ -103,7 +103,12 @@ class X11Capture(ScreenCapture):
         if self._shared is None:
             self._shared = XShmCapture(self.display_name, *self._desktop_size)
         result = self._shared.capture(self._target_size or self._desktop_size)
-        return Frame(result.image, result.captured_ns, *self._desktop_size)
+        return Frame(
+            result.image,
+            result.captured_ns,
+            *self._desktop_size,
+            result.content_digest,
+        )
 
     def capture(self) -> Frame:
         with self._lock:

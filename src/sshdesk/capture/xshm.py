@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import hashlib
 import os
 import time
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ class _XShmSegmentInfo(ctypes.Structure):
 class XShmFrame:
     image: Image.Image
     captured_ns: int
+    content_digest: bytes
 
 
 class XShmCapture:
@@ -234,6 +236,7 @@ class XShmCapture:
             if target != (self.width, self.height):
                 bgra = cv2.resize(bgra, target, interpolation=cv2.INTER_CUBIC)
             rgb = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGB)
+            digest = hashlib.blake2s(rgb, digest_size=8).digest()
             image = Image.fromarray(rgb)
         else:
             image = Image.frombytes(
@@ -247,7 +250,8 @@ class XShmCapture:
             )
             if image.size != target:
                 image = image.resize(target, Image.Resampling.LANCZOS)
-        return XShmFrame(image, captured_ns)
+            digest = hashlib.blake2s(image.tobytes(), digest_size=8).digest()
+        return XShmFrame(image, captured_ns, digest)
 
     def close(self) -> None:
         display = self._display

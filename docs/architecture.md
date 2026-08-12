@@ -40,12 +40,14 @@ scaled to the renderer's exact target. An independent capture worker keeps only
 one latest frame, so rendering or SSH backpressure drops intermediate work
 instead of queuing stale frames. MIT-SHM with native OpenCV scaling and
 Pillow/XCB remain automatic fallbacks. Every backend preserves full-desktop
-coordinates for input.
+coordinates for input. A small capture-level fingerprint lets identical frames
+reuse the previous rendered state without rebuilding terminal cells or tiles.
 Input parsing and X11 injection run in a dedicated thread so slow terminal output
 does not starve keyboard or mouse events. The capture rate targets 60 FPS in
-sharp mode or 30 FPS in ANSI mode during active interaction, 30 FPS during light
-activity, and 2 FPS while idle. The active limit can be configured from 1
-through 120 FPS.
+sharp mode or 30 FPS in ANSI mode and stays fresh at that rate. Presentation
+backs off to 30 FPS during light activity and 2 FPS while idle, but input wakes
+it immediately without restarting capture. The active limit can be configured
+from 1 through 120 FPS.
 
 There is deliberately no SSHDESK application transport or client binary. An
 unmodified SSH client carries one PTY byte stream. Kitty graphics, ANSI/UTF-8,

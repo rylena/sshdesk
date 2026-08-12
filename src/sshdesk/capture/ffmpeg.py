@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import time
 from pathlib import Path
@@ -81,7 +82,7 @@ class FFmpegX11Capture:
         )
         self._buffer = bytearray(width * height * 3)
 
-    def capture(self) -> tuple[Image.Image, int]:
+    def capture(self) -> tuple[Image.Image, int, bytes]:
         self._start()
         process = self._process
         if process is None or process.stdout is None:
@@ -99,8 +100,9 @@ class FFmpegX11Capture:
                 raise OSError(f"FFmpeg X11 capture stream ended{suffix}")
             offset += count
         captured_ns = time.monotonic_ns()
+        digest = hashlib.blake2s(self._buffer, digest_size=8).digest()
         image = Image.frombytes("RGB", self.target_size, self._buffer, "raw", "RGB", 0, 1)
-        return image, captured_ns
+        return image, captured_ns, digest
 
     def _stop(self) -> None:
         process = self._process

@@ -95,6 +95,22 @@ class PerformanceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "between 1 and 120"):
             DirectSession._parse_max_fps("240", sharp=True)
 
+    def test_identical_capture_digest_reuses_rendered_state(self) -> None:
+        image = Image.new("RGB", (16, 9))
+        previous = object()
+        same = Frame(image, 1, content_digest=b"same")
+        changed = Frame(image, 2, content_digest=b"changed")
+        unknown = Frame(image, 3)
+        self.assertTrue(
+            DirectSession._can_reuse_rendered_frame(previous, b"same", same)
+        )
+        self.assertFalse(
+            DirectSession._can_reuse_rendered_frame(previous, b"same", changed)
+        )
+        self.assertFalse(
+            DirectSession._can_reuse_rendered_frame(previous, b"same", unknown)
+        )
+
     def test_frame_rate_change_reaches_capture_backend(self) -> None:
         capture = _FastCapture()
         pump = LatestFramePump(capture, 120)

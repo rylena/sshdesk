@@ -20,7 +20,7 @@ CHUNK_SIZE = 4096
 IMAGE_ID_BASE = 0x7600
 CURSOR_IMAGE_ID = 0x47600
 PLACEMENT_ID = 1
-TILE_TARGET_PIXELS = 128
+TILE_TARGET_PIXELS = 96
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,10 +96,13 @@ def translate_pixel_coordinates(
 class KittyRenderer:
     """Render the desktop as changed RGB tiles in terminal pixel space."""
 
-    def __init__(self, probe: GraphicsProbe) -> None:
+    def __init__(self, probe: GraphicsProbe, top_margin: int = 0) -> None:
         if not probe.usable:
             raise ValueError("Kitty rendering requires graphics and terminal pixel geometry")
+        if not 0 <= top_margin <= 16:
+            raise ValueError("renderer top margin must be between 0 and 16")
         self.probe = probe
+        self.top_margin = top_margin
 
     def _layout(
         self,
@@ -114,17 +117,19 @@ class KittyRenderer:
             raise ValueError("desktop dimensions must be positive")
         cell_width = self.probe.cell_width
         cell_height = self.probe.cell_height
+        margin = min(self.top_margin, max(0, height - 1))
+        content_rows = height - margin
         usable_width = width * cell_width
-        usable_height = height * cell_height
+        usable_height = content_rows * cell_height
         scale = min(usable_width / desktop_width, usable_height / desktop_height)
         ideal_width = max(cell_width, desktop_width * scale)
         ideal_height = max(cell_height, desktop_height * scale)
         cell_columns = max(1, min(width, int(ideal_width // cell_width)))
-        cell_rows = max(1, min(height, int(ideal_height // cell_height)))
+        cell_rows = max(1, min(content_rows, int(ideal_height // cell_height)))
         image_width = cell_columns * cell_width
         image_height = cell_rows * cell_height
         left = (width - cell_columns) // 2
-        top = (height - cell_rows) // 2
+        top = margin + (content_rows - cell_rows) // 2
         viewport = Viewport(
             left,
             top,
@@ -240,8 +245,9 @@ class KittyWriter(TerminalWriter):
         self,
         capabilities: TerminalCapabilities,
         probe: GraphicsProbe,
+        title: str = "SSHDESK",
     ) -> None:
-        super().__init__(capabilities)
+        super().__init__(capabilities, title)
         self.probe = probe
         self._cursor_loaded = False
         self._encoder_pool: ThreadPoolExecutor | None = None
@@ -253,7 +259,7 @@ class KittyWriter(TerminalWriter):
 
     def enter(self) -> bytes:
         self._active = True
-        value = CSI + "?1049h" + CSI + "?25l" + CSI + "?7l"
+        value = self._title_enter() + CSI + "?1049h" + CSI + "?25l" + CSI + "?7l"
         if self.capabilities.mouse:
             value += CSI + "?1003h" + CSI + "?1006h"
             if self.probe.pixel_mouse:
@@ -279,6 +285,7 @@ class KittyWriter(TerminalWriter):
             + "?7h"
             + CSI
             + "?1049l"
+            + self._title_leave()
         ).encode()
 
     @staticmethod

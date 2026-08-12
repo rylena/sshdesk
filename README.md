@@ -62,7 +62,7 @@ automatically receive the lower-resolution ANSI fallback. Press
 - real-pixel rendering through the Kitty graphics protocol on kitty, Ghostty,
   and WezTerm, selected by a live capability probe
 - automatic ANSI half-block fallback on terminals without image support
-- zlib-compressed ~128×128 image tiles with changed-tile retransmission
+- zlib-compressed ~96×96 image tiles with changed-tile retransmission
 - full frames, cell deltas, and unchanged-frame suppression
 - keyboard, Ctrl/Alt/Shift combinations, arrows, navigation, and F1–F12
 - mouse movement, left/right/middle clicks, dragging, and scrolling
@@ -72,7 +72,10 @@ automatically receive the lower-resolution ANSI fallback. Press
 - true-color, 256-color, 16-color, and ASCII rendering fallbacks
 - independently processed input so slow frame output does not starve controls
 - latest-frame scheduling that drops stale work instead of building latency
-- adaptive 60 FPS sharp / 30 FPS ANSI active, 30 FPS light, and 2 FPS idle sampling
+- capture-level fingerprints that bypass rendering for identical frames
+- adaptive 60 FPS sharp / 30 FPS ANSI active, 30 FPS light, and 2 FPS idle presentation
+- immediate input wake-up without restarting a low-rate capture process
+- a persistent device-name header and matching terminal window title
 - cursor-only updates and an optional performance overlay
 - terminal restoration and XTest button/key release after disconnects and errors
 - a synthetic desktop for headless tests and benchmarks
@@ -212,6 +215,8 @@ to require a backend for diagnostics.
 ANSI. Set a numeric value from 1 through 120 to override it. Higher rates require
 enough CPU, terminal rendering speed, and network bandwidth; SSHDESK always
 retains only the newest frame so a slow link cannot create a stale-frame queue.
+Capture remains fresh at the active rate while presentation backs off on an
+unchanged desktop, so the first input after an idle period is not delayed.
 
 ## Architecture
 

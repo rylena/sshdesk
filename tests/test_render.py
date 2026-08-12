@@ -62,6 +62,23 @@ class RenderTests(unittest.TestCase):
         self.assertLess(viewport.height, 40)
         self.assertGreater(viewport.y, 0)
 
+    def test_renderers_reserve_the_device_header_row(self) -> None:
+        source = SyntheticCapture(1920, 1080, animate=False).capture()
+        terminal = TerminalRenderer(top_margin=1).render(source, 80, 24)
+        kitty = KittyRenderer(self.graphics_probe(), top_margin=1).render(source, 80, 24)
+        self.assertGreaterEqual(terminal.viewport.y, 1)
+        self.assertGreaterEqual(kitty.viewport.y, 1)
+        self.assertGreaterEqual(kitty.pixel_viewport.y, kitty.cell_height)
+
+    def test_device_header_and_terminal_title_are_restored(self) -> None:
+        writer = TerminalWriter(
+            TerminalCapabilities("test", ColorMode.TRUECOLOR, True, True, True),
+            "SSHDESK - laptop",
+        )
+        self.assertIn(b"\x1b[22;0t\x1b]2;SSHDESK - laptop", writer.enter())
+        self.assertIn(b"SSHDESK | laptop", writer.header(80))
+        self.assertIn(b"\x1b[23;0t", writer.leave())
+
     def test_delta_writer_emits_one_glyph_per_change(self) -> None:
         renderer = TerminalRenderer(delta_full_threshold=1.0)
         source = SyntheticCapture(100, 100, animate=False)

@@ -4,6 +4,7 @@ import os
 import queue
 import select
 import signal
+import socket
 import sys
 import threading
 import time
@@ -52,12 +53,15 @@ class DirectSession:
     ) -> None:
         self.capture = capture
         self.input = input_backend
-        self.renderer = TerminalRenderer()
         self.capabilities = capabilities or TerminalCapabilities.detect()
-        self.writer = TerminalWriter(self.capabilities)
+        self.device_name = socket.gethostname() or "remote"
+        self.session_title = f"SSHDESK - {self.device_name}"
+        self.renderer = TerminalRenderer(top_margin=1)
+        self.writer = TerminalWriter(self.capabilities, self.session_title)
         self.parser = TerminalEventParser()
         self.stats = SessionStats()
         self.stop_event = threading.Event()
+        self._wake_event = threading.Event()
         self.show_stats = False
         self.current: RenderedFrame | KittyRenderedFrame | None = None
         self.pixel_mouse = False
@@ -85,8 +89,8 @@ class DirectSession:
             rows=rows,
         )
         if probe.usable:
-            self.renderer = KittyRenderer(probe)
-            self.writer = KittyWriter(self.capabilities, probe)
+            self.renderer = KittyRenderer(probe, top_margin=1)
+            self.writer = KittyWriter(self.capabilities, probe, self.session_title)
             self.pixel_mouse = probe.pixel_mouse
             return
         if mode == "kitty":
@@ -116,10 +120,20 @@ class DirectSession:
             return min(self._active_fps, 30.0)
         return min(self._active_fps, 2.0)
 
+    @staticmethod
+    def _can_reuse_rendered_frame(
+        previous: object | None,
+        previous_digest: bytes | None,
+        frame: object,
+    ) -> bool:
+        digest = getattr(frame, "content_digest", None)
+        return previous is not None and digest is not None and digest == previous_digest
+
     def _handle_event(self, event: object) -> bool:
         if isinstance(event, ControlEvent):
             if event.kind == ControlKind.EXIT:
                 self.stop_event.set()
+                self._wake_event.set()
                 return True
             if event.kind == ControlKind.TOGGLE_STATS:
                 self._controls.put(event.kind)
@@ -133,8 +147,6 @@ class DirectSession:
             return False
         if isinstance(event, KeyEvent):
             self.input.key(event)
-            if self._frame_pump is not None:
-                self._frame_pump.set_frames_per_second(self._active_fps)
             return True
         if not isinstance(event, (MouseMoveEvent, MouseButtonEvent, MouseScrollEvent)):
             return False
@@ -161,8 +173,6 @@ class DirectSession:
             self.input.scroll(event.amount, x, y)
         else:
             return False
-        if self._frame_pump is not None:
-            self._frame_pump.set_frames_per_second(self._active_fps)
         return True
 
     def _input_loop(self, input_fd: int) -> None:
@@ -177,6 +187,7 @@ class DirectSession:
                         continue
                     if not data:
                         self.stop_event.set()
+                        self._wake_event.set()
                         return
                     self.stats.bytes_received += len(data)
                     events = self.parser.feed(data)
@@ -185,9 +196,11 @@ class DirectSession:
                 for event in events:
                     if self._handle_event(event):
                         self._last_activity = time.monotonic()
+                        self._wake_event.set()
         except Exception as exc:  # noqa: BLE001 - forward worker failures to main
             self._controls.put(exc)
             self.stop_event.set()
+            self._wake_event.set()
 
     def _draw_extras(
         self,
@@ -195,8 +208,14 @@ class DirectSession:
         cursor: tuple[int, int] | None,
         *,
         draw_stats: bool,
+        draw_header: bool = False,
     ) -> int:
         output = bytearray()
+        if draw_header:
+            with self._current_lock:
+                current = self.current
+            width = current.terminal_width if current is not None else 80
+            output.extend(self.writer.header(width))
         if draw_stats and self.show_stats:
             output.extend(self.writer.overlay(self.stats.snapshot()))
         with self._current_lock:
@@ -214,10 +233,13 @@ class DirectSession:
         last_stats_draw = 0.0
         last_cursor: tuple[int, int] | None = None
         frame_sequence = 0
+        next_frame = 0.0
+        last_content_digest: bytes | None = None
         previous_handlers: dict[int, Any] = {}
 
         def stop_handler(*_: object) -> None:
             self.stop_event.set()
+            self._wake_event.set()
 
         for signal_name in ("SIGHUP", "SIGTERM"):
             signal_value = getattr(signal, signal_name, None)
@@ -266,7 +288,10 @@ class DirectSession:
                                     TerminalState.write_all(terminal.output_fd, ansi)
                                     self.stats.bytes_sent += len(ansi)
                             self._draw_extras(
-                                terminal.output_fd, last_cursor, draw_stats=self.show_stats
+                                terminal.output_fd,
+                                last_cursor,
+                                draw_stats=self.show_stats,
+                                draw_header=True,
                             )
 
                     new_dimensions = TerminalState.size(terminal.output_fd)
@@ -276,17 +301,24 @@ class DirectSession:
                             *self.renderer.target_size(*desktop_dimensions, *dimensions)
                         )
                         previous = None
+                        last_content_digest = None
                         with self._current_lock:
                             self.current = None
                         reset = b"\x1b[2J\x1b[H"
                         if isinstance(self.writer, KittyWriter):
                             reset = b"\x1b_Ga=d,d=A,q=2\x1b\\" + reset
                         TerminalState.write_all(terminal.output_fd, reset)
+                        next_frame = 0.0
 
                     now = time.monotonic()
-                    self._frame_pump.set_frames_per_second(
-                        self._refresh_rate(now, max(self._last_activity, last_change))
+                    refresh_rate = self._refresh_rate(
+                        now, max(self._last_activity, last_change)
                     )
+                    if now < next_frame:
+                        if self._wake_event.wait(min(next_frame - now, 0.05)):
+                            self._wake_event.clear()
+                            next_frame = 0.0
+                        continue
                     captured_frame = self._frame_pump.latest_after(
                         frame_sequence,
                         timeout=0.05,
@@ -296,6 +328,9 @@ class DirectSession:
                     frame_sequence = captured_frame.sequence
                     frame = captured_frame.frame
                     now = time.monotonic()
+                    # Capture keeps running at the active rate. Only presentation
+                    # slows while idle, avoiding a stale 2 FPS stream on input.
+                    next_frame = now + 1.0 / refresh_rate
                     started = time.perf_counter_ns()
                     remote_dimensions = frame.width, frame.height
                     if remote_dimensions != desktop_dimensions:
@@ -304,7 +339,14 @@ class DirectSession:
                             *self.renderer.target_size(*desktop_dimensions, *dimensions)
                         )
                         previous = None
-                    rendered = self.renderer.render(frame, *dimensions)
+                        last_content_digest = None
+                    if self._can_reuse_rendered_frame(
+                        previous, last_content_digest, frame
+                    ):
+                        rendered = previous
+                    else:
+                        rendered = self.renderer.render(frame, *dimensions)
+                    last_content_digest = frame.content_digest
                     rendered_at = time.perf_counter_ns()
                     update = self.renderer.diff(previous, rendered)
                     diffed = time.perf_counter_ns()
@@ -339,6 +381,7 @@ class DirectSession:
                             terminal.output_fd,
                             cursor,
                             draw_stats=self.show_stats,
+                            draw_header=update.kind == UpdateKind.FULL,
                         )
                         last_stats_draw = now
                     elif cursor_changed or draw_stats:
@@ -366,6 +409,7 @@ class DirectSession:
             return 1
         finally:
             self.stop_event.set()
+            self._wake_event.set()
             if self._frame_pump is not None:
                 self._frame_pump.close()
                 self._frame_pump = None

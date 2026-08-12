@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- keep capture fresh at the active rate so input never wakes a stale 2 FPS stream
+- wake presentation immediately for keyboard and mouse activity
+- bypass rendering for identical fingerprinted frames
+- use smaller changed-region tiles to reduce terminal traffic during local motion
+- reserve a persistent header for the connected device name
+- set the terminal window title to the remote hostname and restore it on exit
+
 ## 0.2.0
 
 - target 60 FPS in sharp Kitty-graphics mode with a configurable 1–120 FPS cap
