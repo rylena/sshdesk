@@ -32,6 +32,9 @@ install_root="/opt/sshdesk"
 venv="${install_root}/venv"
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
+command -v ffmpeg >/dev/null || {
+    echo "note: ffmpeg not found; using the slower MIT-SHM capture fallback" >&2
+}
 python3 - <<'PY'
 try:
     import PIL
@@ -69,6 +72,7 @@ umask 077
     printf 'SSHDESK_MOUSE=auto\n'
     printf 'SSHDESK_UNICODE=auto\n'
     printf 'SSHDESK_X11_CAPTURE=auto\n'
+    printf 'SSHDESK_MAX_FPS=auto\n'
 } > "${config}"
 chown root:root "${config}"
 chmod 0644 "${config}"
@@ -76,7 +80,7 @@ chmod 0644 "${config}"
 sudoers="/etc/sudoers.d/sshdesk-${account}"
 if [ "${run_as}" != "${account}" ]; then
     {
-        printf 'Defaults:%s env_keep += "DISPLAY XAUTHORITY SSHDESK_RENDER SSHDESK_COLOR SSHDESK_MOUSE SSHDESK_UNICODE SSHDESK_X11_CAPTURE TERM"\n' "${account}"
+        printf 'Defaults:%s env_keep += "DISPLAY XAUTHORITY SSHDESK_RENDER SSHDESK_COLOR SSHDESK_MOUSE SSHDESK_UNICODE SSHDESK_X11_CAPTURE SSHDESK_MAX_FPS TERM"\n' "${account}"
         printf '%s ALL=(%s) NOPASSWD: /usr/local/bin/sshdesk-server ""\n' "${account}" "${run_as}"
     } > "${sudoers}"
     chmod 0440 "${sudoers}"

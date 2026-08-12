@@ -14,3 +14,8 @@ sshdesk-bench --duration 60 --columns 100 --rows 30 --color 256
 The input figure measures terminal escape parsing, not end-to-end X11 or network
 latency. For repeatable results keep terminal dimensions, color mode, CPU
 governor, Python version, SSH cipher, network path, and desktop workload fixed.
+
+For a live session, press `Ctrl+S` to show captured FPS, displayed FPS, dropped
+intermediate frames, capture/render/diff/encode timings, bandwidth, and terminal
+geometry. A dropped intermediate frame is intentional latest-frame behavior and
+means the client is receiving newer pixels instead of draining old work.

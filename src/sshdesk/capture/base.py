@@ -45,6 +45,11 @@ class ScreenCapture(ABC):
 
         del width, height
 
+    def set_frame_rate(self, frames_per_second: float) -> None:
+        """Request a capture sampling rate when the backend can pace itself."""
+
+        del frames_per_second
+
     def close(self) -> None:
         pass
 

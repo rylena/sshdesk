@@ -36,6 +36,7 @@ from sshdesk.render import (
 from sshdesk.render.base import UpdateKind
 from sshdesk.stats import SessionStats
 
+from .frame_pump import LatestFramePump
 from .terminal_state import TerminalState
 
 
@@ -47,6 +48,7 @@ class DirectSession:
         capture: ScreenCapture,
         input_backend: InputBackend,
         capabilities: TerminalCapabilities | None = None,
+        max_fps: float | None = None,
     ) -> None:
         self.capture = capture
         self.input = input_backend
@@ -56,7 +58,6 @@ class DirectSession:
         self.parser = TerminalEventParser()
         self.stats = SessionStats()
         self.stop_event = threading.Event()
-        self._wake_event = threading.Event()
         self.show_stats = False
         self.current: RenderedFrame | KittyRenderedFrame | None = None
         self.pixel_mouse = False
@@ -66,6 +67,9 @@ class DirectSession:
         self._input_thread: threading.Thread | None = None
         self._latency_probe_ns: int | None = None
         self._last_latency_probe = 0.0
+        self._requested_max_fps = max_fps
+        self._active_fps = 30.0
+        self._frame_pump: LatestFramePump | None = None
 
     def _configure_renderer(self, input_fd: int, output_fd: int) -> None:
         mode = os.environ.get("SSHDESK_RENDER", "auto").strip().lower()
@@ -93,19 +97,29 @@ class DirectSession:
             )
 
     @staticmethod
-    def _interval(now: float, activity: float) -> float:
+    def _parse_max_fps(value: str | float | None, *, sharp: bool) -> float:
+        if value is None or (isinstance(value, str) and value.strip().lower() == "auto"):
+            return 60.0 if sharp else 30.0
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("SSHDESK_MAX_FPS must be auto or a number") from exc
+        if not 1.0 <= parsed <= 120.0:
+            raise RuntimeError("SSHDESK_MAX_FPS must be between 1 and 120")
+        return parsed
+
+    def _refresh_rate(self, now: float, activity: float) -> float:
         idle = now - activity
         if idle < 1.0:
-            return 1 / 30
+            return self._active_fps
         if idle < 5.0:
-            return 1 / 12
-        return 0.5
+            return min(self._active_fps, 30.0)
+        return min(self._active_fps, 2.0)
 
     def _handle_event(self, event: object) -> bool:
         if isinstance(event, ControlEvent):
             if event.kind == ControlKind.EXIT:
                 self.stop_event.set()
-                self._wake_event.set()
                 return True
             if event.kind == ControlKind.TOGGLE_STATS:
                 self._controls.put(event.kind)
@@ -119,6 +133,8 @@ class DirectSession:
             return False
         if isinstance(event, KeyEvent):
             self.input.key(event)
+            if self._frame_pump is not None:
+                self._frame_pump.set_frames_per_second(self._active_fps)
             return True
         if not isinstance(event, (MouseMoveEvent, MouseButtonEvent, MouseScrollEvent)):
             return False
@@ -145,6 +161,8 @@ class DirectSession:
             self.input.scroll(event.amount, x, y)
         else:
             return False
+        if self._frame_pump is not None:
+            self._frame_pump.set_frames_per_second(self._active_fps)
         return True
 
     def _input_loop(self, input_fd: int) -> None:
@@ -159,7 +177,6 @@ class DirectSession:
                         continue
                     if not data:
                         self.stop_event.set()
-                        self._wake_event.set()
                         return
                     self.stats.bytes_received += len(data)
                     events = self.parser.feed(data)
@@ -168,11 +185,9 @@ class DirectSession:
                 for event in events:
                     if self._handle_event(event):
                         self._last_activity = time.monotonic()
-                        self._wake_event.set()
         except Exception as exc:  # noqa: BLE001 - forward worker failures to main
             self._controls.put(exc)
             self.stop_event.set()
-            self._wake_event.set()
 
     def _draw_extras(
         self,
@@ -198,12 +213,11 @@ class DirectSession:
         last_change = time.monotonic()
         last_stats_draw = 0.0
         last_cursor: tuple[int, int] | None = None
-        next_frame = 0.0
+        frame_sequence = 0
         previous_handlers: dict[int, Any] = {}
 
         def stop_handler(*_: object) -> None:
             self.stop_event.set()
-            self._wake_event.set()
 
         for signal_name in ("SIGHUP", "SIGTERM"):
             signal_value = getattr(signal, signal_name, None)
@@ -212,12 +226,21 @@ class DirectSession:
                 signal.signal(signal_value, stop_handler)
         try:
             self._configure_renderer(sys.stdin.fileno(), sys.stdout.fileno())
+            requested_fps: str | float | None = self._requested_max_fps
+            if requested_fps is None:
+                requested_fps = os.environ.get("SSHDESK_MAX_FPS", "auto")
+            self._active_fps = self._parse_max_fps(
+                requested_fps,
+                sharp=isinstance(self.renderer, KittyRenderer),
+            )
             with TerminalState(writer=self.writer) as terminal:
                 dimensions = TerminalState.size(terminal.output_fd)
                 desktop_dimensions = self.capture.size()
-                self.capture.set_target_size(
+                self._frame_pump = LatestFramePump(self.capture, self._active_fps)
+                self._frame_pump.set_target_size(
                     *self.renderer.target_size(*desktop_dimensions, *dimensions)
                 )
+                self._frame_pump.start()
                 self._input_thread = threading.Thread(
                     target=self._input_loop,
                     args=(terminal.input_fd,),
@@ -249,7 +272,7 @@ class DirectSession:
                     new_dimensions = TerminalState.size(terminal.output_fd)
                     if new_dimensions != dimensions:
                         dimensions = new_dimensions
-                        self.capture.set_target_size(
+                        self._frame_pump.set_target_size(
                             *self.renderer.target_size(*desktop_dimensions, *dimensions)
                         )
                         previous = None
@@ -261,19 +284,23 @@ class DirectSession:
                         TerminalState.write_all(terminal.output_fd, reset)
 
                     now = time.monotonic()
-                    if now < next_frame:
-                        if self._wake_event.wait(min(next_frame - now, 0.02)):
-                            self._wake_event.clear()
-                            next_frame = 0.0
+                    self._frame_pump.set_frames_per_second(
+                        self._refresh_rate(now, max(self._last_activity, last_change))
+                    )
+                    captured_frame = self._frame_pump.latest_after(
+                        frame_sequence,
+                        timeout=0.05,
+                    )
+                    if captured_frame is None:
                         continue
-                    next_frame = now + self._interval(now, max(self._last_activity, last_change))
+                    frame_sequence = captured_frame.sequence
+                    frame = captured_frame.frame
+                    now = time.monotonic()
                     started = time.perf_counter_ns()
-                    frame = self.capture.capture()
-                    captured = time.perf_counter_ns()
                     remote_dimensions = frame.width, frame.height
                     if remote_dimensions != desktop_dimensions:
                         desktop_dimensions = remote_dimensions
-                        self.capture.set_target_size(
+                        self._frame_pump.set_target_size(
                             *self.renderer.target_size(*desktop_dimensions, *dimensions)
                         )
                         previous = None
@@ -285,6 +312,10 @@ class DirectSession:
                     with self._current_lock:
                         self.current = rendered
                     self.stats.dimensions(dimensions, (frame.width, frame.height))
+                    self.stats.capture_pipeline(
+                        self._frame_pump.captured_frames,
+                        self._frame_pump.dropped_frames,
+                    )
                     cursor = self.capture.cursor_position()
                     cursor_changed = cursor != last_cursor
                     draw_stats = self.show_stats and now - last_stats_draw >= 1.0
@@ -296,8 +327,8 @@ class DirectSession:
                         self.stats.bytes_sent += len(ansi)
                         last_change = now
                         self.stats.record_frame(
-                            capture_ms=(captured - started) / 1e6,
-                            render_ms=(rendered_at - captured) / 1e6,
+                            capture_ms=captured_frame.capture_ms,
+                            render_ms=(rendered_at - started) / 1e6,
                             diff_ms=(diffed - rendered_at) / 1e6,
                             encode_ms=(encoded - diffed) / 1e6,
                             changed_percentage=update.changed_percentage,
@@ -335,7 +366,9 @@ class DirectSession:
             return 1
         finally:
             self.stop_event.set()
-            self._wake_event.set()
+            if self._frame_pump is not None:
+                self._frame_pump.close()
+                self._frame_pump = None
             if self._input_thread and self._input_thread is not threading.current_thread():
                 self._input_thread.join(timeout=1.0)
             self.writer.close()

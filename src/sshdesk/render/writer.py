@@ -189,7 +189,10 @@ class TerminalWriter:
 
     def overlay(self, stats: StatsSnapshot) -> bytes:
         lines = (
-            f" SSHDESK  {stats.fps:4.1f} FPS  {stats.changed_percentage:4.1f}% changed ",
+            (
+                f" SSHDESK  {stats.fps:4.1f} updates  {stats.captured_fps:4.1f} capture FPS  "
+                f"{stats.changed_percentage:4.1f}% changed "
+            ),
             (
                 f" cap {stats.capture_ms:4.1f}  render {stats.render_ms:4.1f}  "
                 f"diff {stats.diff_ms:4.1f}  enc {stats.encode_ms:4.1f} ms "
@@ -204,7 +207,8 @@ class TerminalWriter:
             (
                 f" term {stats.terminal_width}x{stats.terminal_height}  "
                 f"remote {stats.remote_width}x{stats.remote_height}  "
-                f"full {stats.full_frames}  delta {stats.delta_frames} "
+                f"full {stats.full_frames}  delta {stats.delta_frames}  "
+                f"drop {stats.dropped_frames} "
             ),
         )
         output = io.StringIO()

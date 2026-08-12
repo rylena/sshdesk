@@ -12,6 +12,9 @@ Keep that cookie private. If a different dedicated SSH account is used, granting
 it access to the graphical session is effectively granting it console control.
 The MIT-SHM capture segment is created mode 0600 and immediately marked for
 automatic removal; it remains attached only for the lifetime of the session.
+The preferred FFmpeg backend is launched with a fixed argument vector containing
+only validated dimensions, frame rate, and the configured X11 display. Client
+data is never passed to FFmpeg or a shell.
 
 The installer places non-secret terminal/display settings in a root-owned,
 read-only-to-users mode-0644 file at

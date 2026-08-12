@@ -31,6 +31,8 @@ SSHDESK_RENDER=auto
 SSHDESK_COLOR=truecolor
 SSHDESK_MOUSE=auto
 SSHDESK_UNICODE=auto
+SSHDESK_X11_CAPTURE=auto
+SSHDESK_MAX_FPS=auto
 ```
 
 `SSHDESK_RENDER=kitty` makes missing graphics support an explicit error;

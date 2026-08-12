@@ -25,6 +25,7 @@ if [ -r "${config}" ]; then
             SSHDESK_MOUSE) SSHDESK_MOUSE="${value}" ;;
             SSHDESK_UNICODE) SSHDESK_UNICODE="${value}" ;;
             SSHDESK_X11_CAPTURE) SSHDESK_X11_CAPTURE="${value}" ;;
+            SSHDESK_MAX_FPS) SSHDESK_MAX_FPS="${value}" ;;
         esac
     done < "${config}"
 fi
@@ -41,6 +42,7 @@ export SSHDESK_COLOR="${SSHDESK_COLOR-auto}"
 export SSHDESK_MOUSE="${SSHDESK_MOUSE-auto}"
 export SSHDESK_UNICODE="${SSHDESK_UNICODE-auto}"
 export SSHDESK_X11_CAPTURE="${SSHDESK_X11_CAPTURE-auto}"
+export SSHDESK_MAX_FPS="${SSHDESK_MAX_FPS-auto}"
 
 if [ "${RUN_AS}" != "${account}" ]; then
     exec /usr/bin/sudo -n -u "${RUN_AS}" -- /usr/local/bin/sshdesk-server

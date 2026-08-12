@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import os
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from PIL import Image
 
@@ -71,6 +73,8 @@ class XShmCapture:
         self._image: ctypes.POINTER(_XImage) | None = None
         self._address: int | None = None
         self._buffer: ctypes.Array[ctypes.c_ubyte] | None = None
+        self._cv2: Any = None
+        self._native_bgra: Any = None
         self._info = _XShmSegmentInfo()
         self._info.shmid = -1
         self._attached = False
@@ -191,6 +195,22 @@ class XShmCapture:
         if self._libc.shmctl(shmid, IPC_RMID, None) == 0:
             self._marked_for_removal = True
         self._buffer = (ctypes.c_ubyte * size).from_address(address)
+        try:
+            import cv2
+            import numpy
+
+            cv2.setUseOptimized(True)
+            cv2.setNumThreads(min(4, os.cpu_count() or 1))
+            native = numpy.ctypeslib.as_array(self._buffer).reshape(
+                self.height, image.contents.bytes_per_line
+            )
+            self._native_bgra = native[:, : self.width * 4].reshape(
+                self.height, self.width, 4
+            )
+            self._cv2 = cv2
+        except ImportError:
+            self._cv2 = None
+            self._native_bgra = None
 
     def capture(self, target: tuple[int, int]) -> XShmFrame:
         if self._display is None or self._image is None or self._buffer is None:
@@ -208,18 +228,14 @@ class XShmCapture:
         width, height = target
         if not (1 <= width <= self.width and 1 <= height <= self.height):
             raise ValueError("X11 shared capture target is out of bounds")
-        try:
-            import cv2
-            import numpy
-
-            stride = self._image.contents.bytes_per_line
-            native = numpy.ctypeslib.as_array(self._buffer).reshape(self.height, stride)
-            bgra = native[:, : self.width * 4].reshape(self.height, self.width, 4)
+        if self._cv2 is not None and self._native_bgra is not None:
+            cv2 = self._cv2
+            bgra = self._native_bgra
             if target != (self.width, self.height):
                 bgra = cv2.resize(bgra, target, interpolation=cv2.INTER_CUBIC)
             rgb = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGB)
             image = Image.fromarray(rgb)
-        except ImportError:
+        else:
             image = Image.frombytes(
                 "RGB",
                 (self.width, self.height),
@@ -245,6 +261,8 @@ class XShmCapture:
             image.contents.data = None
             self._x11.XDestroyImage(image)
             self._image = None
+        self._native_bgra = None
+        self._cv2 = None
         self._buffer = None
         if address is not None:
             self._libc.shmdt(address)

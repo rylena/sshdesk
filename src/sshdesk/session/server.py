@@ -58,6 +58,11 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-mouse", action="store_true", help="keyboard-only mode")
     parser.add_argument("--ascii", action="store_true", help="avoid Unicode half-block glyphs")
     parser.add_argument(
+        "--max-fps",
+        type=float,
+        help="active refresh limit (default: 60 sharp pixels, 30 ANSI; maximum 120)",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="verify X11 capture and input access without starting a terminal session",
@@ -83,7 +88,12 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
             return 0
         from .direct import DirectSession
 
-        session = DirectSession(capture, input_backend, _capabilities(args))
+        session = DirectSession(
+            capture,
+            input_backend,
+            _capabilities(args),
+            max_fps=args.max_fps,
+        )
         # Ownership transfers to the session, including failure cleanup.
         capture = None
         input_backend = None

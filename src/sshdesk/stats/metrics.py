@@ -9,6 +9,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class StatsSnapshot:
     fps: float = 0.0
+    captured_fps: float = 0.0
     capture_ms: float = 0.0
     render_ms: float = 0.0
     diff_ms: float = 0.0
@@ -25,6 +26,8 @@ class StatsSnapshot:
     remote_height: int = 0
     full_frames: int = 0
     delta_frames: int = 0
+    captured_frames: int = 0
+    dropped_frames: int = 0
 
 class SessionStats:
     """Low-overhead rolling performance instrumentation."""
@@ -45,12 +48,16 @@ class SessionStats:
         self.remote_height = 0
         self.full_frames = 0
         self.delta_frames = 0
+        self.captured_frames = 0
+        self.dropped_frames = 0
         self.latency_ms = 0.0
         self._last_rate_time = self.started
         self._last_rate_sent = 0
         self._last_rate_received = 0
         self._sent_rate = 0.0
         self._received_rate = 0.0
+        self._last_rate_captured = 0
+        self._capture_rate = 0.0
         self._lock = threading.Lock()
 
     @staticmethod
@@ -87,6 +94,11 @@ class SessionStats:
             self.terminal_width, self.terminal_height = terminal
             self.remote_width, self.remote_height = remote
 
+    def capture_pipeline(self, captured: int, dropped: int) -> None:
+        with self._lock:
+            self.captured_frames = max(0, captured)
+            self.dropped_frames = max(0, dropped)
+
     def snapshot(self) -> StatsSnapshot:
         with self._lock:
             now = time.monotonic()
@@ -96,11 +108,16 @@ class SessionStats:
             if elapsed >= 0.25:
                 self._sent_rate = (self.bytes_sent - self._last_rate_sent) / elapsed
                 self._received_rate = (self.bytes_received - self._last_rate_received) / elapsed
+                self._capture_rate = (
+                    self.captured_frames - self._last_rate_captured
+                ) / elapsed
                 self._last_rate_sent = self.bytes_sent
                 self._last_rate_received = self.bytes_received
+                self._last_rate_captured = self.captured_frames
                 self._last_rate_time = now
             return StatsSnapshot(
                 fps=float(len(self._frame_times)),
+                captured_fps=self._capture_rate,
                 capture_ms=self._average(self._capture_ms),
                 render_ms=self._average(self._render_ms),
                 diff_ms=self._average(self._diff_ms),
@@ -117,4 +134,6 @@ class SessionStats:
                 remote_height=self.remote_height,
                 full_frames=self.full_frames,
                 delta_frames=self.delta_frames,
+                captured_frames=self.captured_frames,
+                dropped_frames=self.dropped_frames,
             )

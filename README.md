@@ -32,7 +32,7 @@ This MVP targets an active X11 desktop. From the server:
 
 ```bash
 sudo apt install openssh-server python3 python3-venv python3-pil \
-  python3-xlib libxtst6 libxext6
+  python3-xlib libxtst6 libxext6 ffmpeg
 git clone https://github.com/rylena/sshdesk.git
 cd sshdesk
 
@@ -57,7 +57,8 @@ automatically receive the lower-resolution ANSI fallback. Press
 ## What works
 
 - active X11 desktop capture at its detected resolution
-- on-demand MIT-SHM capture with renderer-sized native OpenCV scaling
+- continuously drained FFmpeg/XCB capture with renderer-sized scaling
+- current-frame MIT-SHM and Pillow/XCB capture fallbacks
 - real-pixel rendering through the Kitty graphics protocol on kitty, Ghostty,
   and WezTerm, selected by a live capability probe
 - automatic ANSI half-block fallback on terminals without image support
@@ -70,7 +71,8 @@ automatically receive the lower-resolution ANSI fallback. Press
 - aspect-ratio-preserving scaling and letterboxing
 - true-color, 256-color, 16-color, and ASCII rendering fallbacks
 - independently processed input so slow frame output does not starve controls
-- adaptive 30 FPS active, 12 FPS light, and 2 FPS idle sampling
+- latest-frame scheduling that drops stale work instead of building latency
+- adaptive 60 FPS sharp / 30 FPS ANSI active, 30 FPS light, and 2 FPS idle sampling
 - cursor-only updates and an optional performance overlay
 - terminal restoration and XTest button/key release after disconnects and errors
 - a synthetic desktop for headless tests and benchmarks
@@ -98,7 +100,7 @@ Install system dependencies:
 
 ```bash
 sudo apt install openssh-server python3 python3-venv python3-pil \
-  python3-xlib libxtst6 libxext6
+  python3-xlib libxtst6 libxext6 ffmpeg
 ```
 
 For the accelerated scaling path, install the `fast` Python extra in a virtual
@@ -192,6 +194,7 @@ SSHDESK_COLOR=truecolor
 SSHDESK_MOUSE=auto
 SSHDESK_UNICODE=auto
 SSHDESK_X11_CAPTURE=auto
+SSHDESK_MAX_FPS=auto
 ```
 
 See [client compatibility](docs/compatibility.md) for fallbacks.
@@ -201,9 +204,14 @@ supported. Set it to `kitty` to require sharp mode or `ansi` to force the
 universal fallback. This setting changes only terminal rendering; the connection
 is still ordinary SSH.
 
-`SSHDESK_X11_CAPTURE=auto` prefers current-frame MIT-SHM capture and falls back
-to Pillow/XCB. Use `xshm` to require the accelerated backend or `pillow` for
-diagnostics.
+`SSHDESK_X11_CAPTURE=auto` prefers a continuously drained FFmpeg/XCB stream,
+then current-frame MIT-SHM, then Pillow/XCB. Use `ffmpeg`, `xshm`, or `pillow`
+to require a backend for diagnostics.
+
+`SSHDESK_MAX_FPS=auto` targets 60 FPS for sharp terminal pixels and 30 FPS for
+ANSI. Set a numeric value from 1 through 120 to override it. Higher rates require
+enough CPU, terminal rendering speed, and network bandwidth; SSHDESK always
+retains only the newest frame so a slow link cannot create a stale-frame queue.
 
 ## Architecture
 
@@ -219,6 +227,7 @@ carries its PTY byte stream over one connection. See
 - [Client and terminal compatibility](docs/compatibility.md)
 - [Security and permissions](docs/security.md)
 - [Benchmark methodology](docs/benchmark.md)
+- [Changelog](CHANGELOG.md)
 
 ## Test and benchmark
 
