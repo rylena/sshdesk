@@ -12,6 +12,7 @@ import time
 import unittest
 from pathlib import Path
 
+from sshdesk.render import ColorMode, TerminalCapabilities, TerminalWriter
 from sshdesk.session.terminal_state import TerminalState
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,8 +23,13 @@ class LifecycleTests(unittest.TestCase):
     def test_terminal_restored_after_exception(self) -> None:
         master, slave = pty.openpty()
         before = termios.tcgetattr(slave)
+        writer = TerminalWriter(
+            TerminalCapabilities("test", ColorMode.ANSI256, True, True, True)
+        )
         try:
-            with self.assertRaisesRegex(RuntimeError, "crash"), TerminalState(slave, slave):
+            with self.assertRaisesRegex(RuntimeError, "crash"), TerminalState(
+                slave, slave, writer
+            ):
                 raise RuntimeError("simulated crash")
             self.assertEqual(termios.tcgetattr(slave), before)
         finally:
