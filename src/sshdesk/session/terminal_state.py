@@ -49,13 +49,16 @@ class TerminalState:
     def __enter__(self) -> TerminalState:  # noqa: PYI034 - Python 3.10 lacks typing.Self
         if not os.isatty(self.input_fd) or not os.isatty(self.output_fd):
             raise RuntimeError("SSHDESK client requires an interactive terminal")
-        if os.name != "posix":
-            raise RuntimeError("sshdesk-server currently requires a Linux/POSIX server")
-        import termios
-        import tty
+        if os.name == "posix":
+            import termios
+            import tty
 
-        self._attributes = termios.tcgetattr(self.input_fd)
-        tty.setraw(self.input_fd, termios.TCSANOW)
+            self._attributes = termios.tcgetattr(self.input_fd)
+            tty.setraw(self.input_fd, termios.TCSANOW)
+        elif os.name == "nt":
+            self._enter_windows_console()
+        else:
+            raise RuntimeError(f"unsupported terminal platform: {os.name}")
         self.active = True
         try:
             self.write_all(self.output_fd, self.writer.enter())
@@ -63,6 +66,38 @@ class TerminalState:
             self.restore()
             raise
         return self
+
+    def _enter_windows_console(self) -> None:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        get_mode = kernel32.GetConsoleMode
+        get_mode.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        get_mode.restype = wintypes.BOOL
+        set_mode = kernel32.SetConsoleMode
+        set_mode.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        set_mode.restype = wintypes.BOOL
+        input_handle = wintypes.HANDLE(msvcrt.get_osfhandle(self.input_fd))
+        output_handle = wintypes.HANDLE(msvcrt.get_osfhandle(self.output_fd))
+        input_mode = wintypes.DWORD()
+        output_mode = wintypes.DWORD()
+        if not get_mode(input_handle, ctypes.byref(input_mode)) or not get_mode(
+            output_handle, ctypes.byref(output_mode)
+        ):
+            raise RuntimeError("SSHDESK needs a Windows console or OpenSSH ConPTY")
+
+        # Raw VT input and ANSI output. Preserve both modes for crash-safe cleanup.
+        raw_input = input_mode.value & ~(0x0001 | 0x0002 | 0x0004 | 0x0040)
+        raw_input |= 0x0080 | 0x0200
+        vt_output = output_mode.value | 0x0001 | 0x0004
+        if not set_mode(input_handle, raw_input):
+            raise OSError(ctypes.get_last_error(), "could not enable Windows terminal raw mode")
+        if not set_mode(output_handle, vt_output):
+            set_mode(input_handle, input_mode.value)
+            raise OSError(ctypes.get_last_error(), "could not enable Windows terminal ANSI mode")
+        self._attributes = (kernel32, input_handle, input_mode.value, output_handle, output_mode.value)
 
     def restore(self) -> None:
         if not self.active:
@@ -74,10 +109,14 @@ class TerminalState:
             except OSError as exc:
                 write_error = exc
         finally:
-            if self._attributes is not None:
+            if self._attributes is not None and os.name == "posix":
                 import termios
 
                 termios.tcsetattr(self.input_fd, termios.TCSANOW, self._attributes)
+            elif self._attributes is not None and os.name == "nt":
+                kernel32, input_handle, input_mode, output_handle, output_mode = self._attributes
+                kernel32.SetConsoleMode(input_handle, input_mode)
+                kernel32.SetConsoleMode(output_handle, output_mode)
             self.active = False
         if write_error is not None:
             raise write_error

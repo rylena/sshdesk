@@ -40,6 +40,31 @@ from sshdesk.stats import SessionStats
 from .frame_pump import LatestFramePump
 from .terminal_state import TerminalState
 
+WINDOWS_CONSOLE_KEYS = {
+    "H": b"\x1b[A",
+    "P": b"\x1b[B",
+    "M": b"\x1b[C",
+    "K": b"\x1b[D",
+    "G": b"\x1b[H",
+    "O": b"\x1b[F",
+    "I": b"\x1b[5~",
+    "Q": b"\x1b[6~",
+    "R": b"\x1b[2~",
+    "S": b"\x1b[3~",
+    ";": b"\x1bOP",
+    "<": b"\x1bOQ",
+    "=": b"\x1bOR",
+    ">": b"\x1bOS",
+    "?": b"\x1b[15~",
+    "@": b"\x1b[17~",
+    "A": b"\x1b[18~",
+    "B": b"\x1b[19~",
+    "C": b"\x1b[20~",
+    "D": b"\x1b[21~",
+    "\x85": b"\x1b[23~",
+    "\x86": b"\x1b[24~",
+}
+
 
 class DirectSession:
     """Render pixels or ANSI cells and consume input through one ordinary SSH PTY."""
@@ -179,20 +204,37 @@ class DirectSession:
         """Read and inject input independently so slow frame writes cannot starve it."""
         try:
             while not self.stop_event.is_set():
-                ready, _, _ = select.select((input_fd,), (), (), 0.05)
-                if ready:
-                    try:
-                        data = os.read(input_fd, 4096)
-                    except BlockingIOError:
-                        continue
-                    if not data:
-                        self.stop_event.set()
-                        self._wake_event.set()
-                        return
-                    self.stats.bytes_received += len(data)
-                    events = self.parser.feed(data)
+                if os.name == "nt":
+                    import msvcrt
+
+                    data = bytearray()
+                    while msvcrt.kbhit() and len(data) < 4096:
+                        character = msvcrt.getwch()
+                        if character in {"\x00", "\xe0"} and msvcrt.kbhit():
+                            data.extend(WINDOWS_CONSOLE_KEYS.get(msvcrt.getwch(), b""))
+                        else:
+                            data.extend(character.encode("utf-8", errors="replace"))
+                    if data:
+                        self.stats.bytes_received += len(data)
+                        events = self.parser.feed(bytes(data))
+                    else:
+                        events = self.parser.flush()
+                        self.stop_event.wait(0.01)
                 else:
-                    events = self.parser.flush()
+                    ready, _, _ = select.select((input_fd,), (), (), 0.05)
+                    if ready:
+                        try:
+                            data = os.read(input_fd, 4096)
+                        except BlockingIOError:
+                            continue
+                        if not data:
+                            self.stop_event.set()
+                            self._wake_event.set()
+                            return
+                        self.stats.bytes_received += len(data)
+                        events = self.parser.feed(data)
+                    else:
+                        events = self.parser.flush()
                 for event in events:
                     if self._handle_event(event):
                         self._last_activity = time.monotonic()

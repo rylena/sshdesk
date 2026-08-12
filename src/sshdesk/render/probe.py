@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import fcntl
 import os
 import re
-import select
 import struct
-import termios
 import time
-import tty
 from dataclasses import dataclass
+
+if os.name == "posix":
+    import fcntl
+    import select
+    import termios
+    import tty
 
 PROBE_IMAGE_ID = 0x765
 PROBE_TIMEOUT = 0.75
@@ -16,6 +18,10 @@ KITTY_REPLY_RE = re.compile(rb"\x1b_G([^\x1b]*?)\x1b\\")
 TEXT_AREA_RE = re.compile(rb"\x1b\[4;(\d{1,6});(\d{1,6})t")
 CELL_SIZE_RE = re.compile(rb"\x1b\[6;(\d{1,4});(\d{1,4})t")
 DA1_RE = re.compile(rb"\x1b\[\?[0-9;]*c")
+
+
+def tmux_passthrough(sequence: bytes) -> bytes:
+    return b"\x1bPtmux;" + sequence.replace(b"\x1b", b"\x1b\x1b") + b"\x1b\\"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +100,8 @@ def parse_graphics_probe(
 
 
 def ioctl_pixel_size(fd: int) -> tuple[int, int]:
+    if os.name != "posix":
+        return 0, 0
     try:
         packed = fcntl.ioctl(fd, termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0))
         _rows, _columns, width, height = struct.unpack("HHHH", packed)
@@ -111,17 +119,17 @@ def probe_graphics(
     timeout: float = PROBE_TIMEOUT,
 ) -> GraphicsProbe:
     """Probe the terminal through the SSH PTY before the input thread starts."""
-    if not os.isatty(input_fd) or not os.isatty(output_fd):
+    if os.name != "posix" or not os.isatty(input_fd) or not os.isatty(output_fd):
         return GraphicsProbe()
     attributes = termios.tcgetattr(input_fd)
-    payload = (
+    graphics_query = (
         f"\x1b_Gi={PROBE_IMAGE_ID},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\"
-        "\x1b[14t"
-        "\x1b[16t"
-        "\x1b[?1016$p"
-        "\x1b[?2026$p"
-        "\x1b[c"
     ).encode()
+    if os.environ.get("TMUX"):
+        graphics_query = tmux_passthrough(graphics_query)
+    payload = graphics_query + (
+        b"\x1b[14t\x1b[16t\x1b[?1016$p\x1b[?2026$p\x1b[c"
+    )
     reply = bytearray()
     try:
         tty.setraw(input_fd, termios.TCSANOW)

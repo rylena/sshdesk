@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import fcntl
 import os
-import pty
 import select
 import struct
 import subprocess
 import sys
-import termios
 import time
 import unittest
 from pathlib import Path
+
+if os.name == "posix":
+    import fcntl
+    import pty
+    import termios
 
 from sshdesk.render import ColorMode, TerminalCapabilities, TerminalWriter
 from sshdesk.session.terminal_state import TerminalState

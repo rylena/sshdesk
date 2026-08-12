@@ -38,6 +38,11 @@ SSHDESK_MAX_FPS=auto
 `SSHDESK_RENDER=kitty` makes missing graphics support an explicit error;
 `SSHDESK_RENDER=ansi` skips the image capability probe.
 
+Sharp graphics also work inside tmux when tmux supports `allow-passthrough`.
+`sshdesk-split` enables it automatically and wraps each Kitty APC for tmux.
+Older multiplexer releases may require ANSI mode. The optional split helper is
+not required for normal `ssh user@host` sessions.
+
 During a session SSHDESK reserves the first terminal row for the remote device
 name and sets the terminal window title to the same hostname. Terminals that
 implement the xterm title stack restore the previous title when SSHDESK exits.

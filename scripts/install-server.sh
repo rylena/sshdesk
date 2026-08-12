@@ -25,6 +25,19 @@ case "${display}${xauthority}" in
     *'
 '*) echo "display and Xauthority must not contain newlines" >&2; exit 2 ;;
 esac
+for session_value in \
+    "${WAYLAND_DISPLAY-}" \
+    "${XDG_RUNTIME_DIR-}" \
+    "${XDG_SESSION_TYPE-}" \
+    "${XDG_CURRENT_DESKTOP-}" \
+    "${DBUS_SESSION_BUS_ADDRESS-}" \
+    "${YDOTOOL_SOCKET-}"
+do
+    case "${session_value}" in
+        *'
+'*) echo "desktop session variables must not contain newlines" >&2; exit 2 ;;
+    esac
+done
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 project_dir="$(dirname -- "${script_dir}")"
@@ -35,31 +48,28 @@ command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 command -v ffmpeg >/dev/null || {
     echo "note: ffmpeg not found; using the slower MIT-SHM capture fallback" >&2
 }
-python3 - <<'PY'
-try:
-    import PIL
-    import Xlib
-except ImportError as exc:
-    raise SystemExit(
-        f"missing {exc.name}; install python3-pil and python3-xlib before SSHDESK"
-    )
-PY
-
-if ! /usr/bin/sudo -n -u "${run_as}" -- python3 -c 'import cv2, numpy' 2>/dev/null; then
-    echo "note: OpenCV/NumPy not found; XShm works but native scaling acceleration is disabled" >&2
-fi
 
 install -d -m 0755 "${install_root}" /etc/sshdesk /usr/local/bin /etc/sudoers.d
 if [ ! -x "${venv}/bin/python" ]; then
-    python3 -m venv --system-site-packages "${venv}"
+    python3 -m venv --system-site-packages "${venv}" || {
+        echo "could not create a venv; install your distribution's Python venv package" >&2
+        exit 1
+    }
 fi
-"${venv}/bin/python" -m pip install --no-build-isolation --upgrade "${project_dir}[fast]"
+if ! "${venv}/bin/python" -m pip install --no-build-isolation --upgrade "${project_dir}[fast]"; then
+    echo "note: optional native acceleration failed; installing the portable build" >&2
+    "${venv}/bin/python" -m pip install --no-build-isolation --upgrade "${project_dir}"
+fi
 
 install -m 0755 "${script_dir}/sshdesk-forced-command" /usr/local/bin/sshdesk-forced-command
 ln -sfn "${venv}/bin/sshdesk-server" /usr/local/bin/sshdesk-server
 ln -sfn "${venv}/bin/sshdesk-bench" /usr/local/bin/sshdesk-bench
 ln -sfn "${venv}/bin/sshdesk-local" /usr/local/bin/sshdesk-local
 ln -sfn "${venv}/bin/sshdesk" /usr/local/bin/sshdesk
+ln -sfn "${venv}/bin/sshdesk-agent" /usr/local/bin/sshdesk-agent
+ln -sfn "${venv}/bin/sshdesk-agent-ssh" /usr/local/bin/sshdesk-agent-ssh
+ln -sfn "${venv}/bin/sshdesk-split" /usr/local/bin/sshdesk-split
+ln -sfn "${venv}/bin/sshdesk-remote" /usr/local/bin/sshdesk-remote
 
 config="/etc/sshdesk/${account}.conf"
 umask 077
@@ -67,6 +77,13 @@ umask 077
     printf 'DISPLAY=%s\n' "${display}"
     printf 'XAUTHORITY=%s\n' "${xauthority}"
     printf 'RUN_AS=%s\n' "${run_as}"
+    [ -z "${WAYLAND_DISPLAY-}" ] || printf 'WAYLAND_DISPLAY=%s\n' "${WAYLAND_DISPLAY}"
+    [ -z "${XDG_RUNTIME_DIR-}" ] || printf 'XDG_RUNTIME_DIR=%s\n' "${XDG_RUNTIME_DIR}"
+    [ -z "${XDG_SESSION_TYPE-}" ] || printf 'XDG_SESSION_TYPE=%s\n' "${XDG_SESSION_TYPE}"
+    [ -z "${XDG_CURRENT_DESKTOP-}" ] || printf 'XDG_CURRENT_DESKTOP=%s\n' "${XDG_CURRENT_DESKTOP}"
+    [ -z "${DBUS_SESSION_BUS_ADDRESS-}" ] || \
+        printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "${DBUS_SESSION_BUS_ADDRESS}"
+    [ -z "${YDOTOOL_SOCKET-}" ] || printf 'YDOTOOL_SOCKET=%s\n' "${YDOTOOL_SOCKET}"
     printf 'SSHDESK_RENDER=auto\n'
     printf 'SSHDESK_COLOR=auto\n'
     printf 'SSHDESK_MOUSE=auto\n'
@@ -80,8 +97,9 @@ chmod 0644 "${config}"
 sudoers="/etc/sudoers.d/sshdesk-${account}"
 if [ "${run_as}" != "${account}" ]; then
     {
-        printf 'Defaults:%s env_keep += "DISPLAY XAUTHORITY SSHDESK_RENDER SSHDESK_COLOR SSHDESK_MOUSE SSHDESK_UNICODE SSHDESK_X11_CAPTURE SSHDESK_MAX_FPS TERM"\n' "${account}"
+        printf 'Defaults:%s env_keep += "DISPLAY XAUTHORITY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS YDOTOOL_SOCKET SSHDESK_RENDER SSHDESK_COLOR SSHDESK_MOUSE SSHDESK_UNICODE SSHDESK_X11_CAPTURE SSHDESK_MAX_FPS TERM"\n' "${account}"
         printf '%s ALL=(%s) NOPASSWD: /usr/local/bin/sshdesk-server ""\n' "${account}" "${run_as}"
+        printf '%s ALL=(%s) NOPASSWD: /usr/local/bin/sshdesk-agent-ssh *\n' "${account}" "${run_as}"
     } > "${sudoers}"
     chmod 0440 "${sudoers}"
     /usr/sbin/visudo -cf "${sudoers}" >/dev/null

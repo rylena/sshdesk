@@ -251,6 +251,12 @@ class KittyWriter(TerminalWriter):
         self.probe = probe
         self._cursor_loaded = False
         self._encoder_pool: ThreadPoolExecutor | None = None
+        self._tmux = bool(os.environ.get("TMUX"))
+
+    def _graphics(self, sequence: bytes) -> bytes:
+        if not self._tmux:
+            return sequence
+        return b"\x1bPtmux;" + sequence.replace(b"\x1b", b"\x1b\x1b") + b"\x1b\\"
 
     def close(self) -> None:
         if self._encoder_pool is not None:
@@ -269,9 +275,8 @@ class KittyWriter(TerminalWriter):
     def leave(self) -> bytes:
         self._active = False
         self._cursor_loaded = False
-        return (
-            "\x1b_Ga=d,d=A,q=2\x1b\\"
-            + CSI
+        terminal_reset = (
+            CSI
             + "0m"
             + CSI
             + "?25h"
@@ -287,6 +292,7 @@ class KittyWriter(TerminalWriter):
             + "?1049l"
             + self._title_leave()
         ).encode()
+        return self._graphics(b"\x1b_Ga=d,d=A,q=2\x1b\\") + terminal_reset
 
     @staticmethod
     def _chunks(payload: bytes) -> tuple[bytes, ...]:
@@ -300,22 +306,26 @@ class KittyWriter(TerminalWriter):
         encoded = base64.b64encode(compressed)
         chunks = self._chunks(encoded)
         output = bytearray(
-            f"\x1b_Ga=d,d=i,i={tile.image_id},p={PLACEMENT_ID},q=2\x1b\\"
-            f"{CSI}{tile.row + 1};{tile.column + 1}H".encode()
+            self._graphics(
+                f"\x1b_Ga=d,d=i,i={tile.image_id},p={PLACEMENT_ID},q=2\x1b\\".encode()
+            )
         )
+        output.extend(f"{CSI}{tile.row + 1};{tile.column + 1}H".encode())
         first = chunks[0] if chunks else b""
         more = 1 if len(chunks) > 1 else 0
-        output.extend(
+        first_command = bytearray(
             f"\x1b_Ga=T,q=2,C=1,z=-1,f=24,i={tile.image_id},p={PLACEMENT_ID},"
             f"s={tile.width},v={tile.height},o=z,m={more};".encode()
         )
-        output.extend(first)
-        output.extend(b"\x1b\\")
+        first_command.extend(first)
+        first_command.extend(b"\x1b\\")
+        output.extend(self._graphics(bytes(first_command)))
         for index, chunk in enumerate(chunks[1:], 1):
             more = 1 if index < len(chunks) - 1 else 0
-            output.extend(f"\x1b_Gm={more},q=2;".encode())
-            output.extend(chunk)
-            output.extend(b"\x1b\\")
+            command = bytearray(f"\x1b_Gm={more},q=2;".encode())
+            command.extend(chunk)
+            command.extend(b"\x1b\\")
+            output.extend(self._graphics(bytes(command)))
         return bytes(output)
 
     def _frame(self, tiles: tuple[KittyTile, ...], *, clear: bool = False) -> bytes:
@@ -324,7 +334,7 @@ class KittyWriter(TerminalWriter):
             output.extend((CSI + "?2026h").encode())
         if clear:
             self._cursor_loaded = False
-            output.extend(b"\x1b_Ga=d,d=A,q=2\x1b\\")
+            output.extend(self._graphics(b"\x1b_Ga=d,d=A,q=2\x1b\\"))
             output.extend((CSI + "2J" + CSI + "H").encode())
         if len(tiles) >= 4:
             if self._encoder_pool is None:
@@ -369,8 +379,8 @@ class KittyWriter(TerminalWriter):
                 pixels[offset : offset + 4] = bytes(color)
         return width, height, bytes(pixels)
 
-    @staticmethod
     def _inline_image(
+        self,
         image_id: int,
         column: int,
         row: int,
@@ -383,22 +393,26 @@ class KittyWriter(TerminalWriter):
         encoded = base64.b64encode(rgba)
         chunks = KittyWriter._chunks(encoded)
         output = bytearray(
-            f"\x1b_Ga=d,d=i,i={image_id},p={PLACEMENT_ID},q=2\x1b\\"
-            f"{CSI}{row + 1};{column + 1}H".encode()
+            self._graphics(
+                f"\x1b_Ga=d,d=i,i={image_id},p={PLACEMENT_ID},q=2\x1b\\".encode()
+            )
         )
+        output.extend(f"{CSI}{row + 1};{column + 1}H".encode())
         first = chunks[0] if chunks else b""
         more = 1 if len(chunks) > 1 else 0
-        output.extend(
+        first_command = bytearray(
             f"\x1b_Ga=T,q=2,C=1,z=1,f=32,i={image_id},p={PLACEMENT_ID},"
             f"s={width},v={height},X={x_offset},Y={y_offset},m={more};".encode()
         )
-        output.extend(first)
-        output.extend(b"\x1b\\")
+        first_command.extend(first)
+        first_command.extend(b"\x1b\\")
+        output.extend(self._graphics(bytes(first_command)))
         for index, chunk in enumerate(chunks[1:], 1):
             more = 1 if index < len(chunks) - 1 else 0
-            output.extend(f"\x1b_Gm={more},q=2;".encode())
-            output.extend(chunk)
-            output.extend(b"\x1b\\")
+            command = bytearray(f"\x1b_Gm={more},q=2;".encode())
+            command.extend(chunk)
+            command.extend(b"\x1b\\")
+            output.extend(self._graphics(bytes(command)))
         return bytes(output)
 
     def cursor(
@@ -409,7 +423,9 @@ class KittyWriter(TerminalWriter):
         visible: bool,
     ) -> bytes:
         if not visible:
-            return f"\x1b_Ga=d,d=i,i={CURSOR_IMAGE_ID},p={PLACEMENT_ID},q=2\x1b\\".encode()
+            return self._graphics(
+                f"\x1b_Ga=d,d=i,i={CURSOR_IMAGE_ID},p={PLACEMENT_ID},q=2\x1b\\".encode()
+            )
         viewport = frame.pixel_viewport
         px = viewport.x + min(
             viewport.width - 1,
@@ -434,9 +450,18 @@ class KittyWriter(TerminalWriter):
                 height,
                 rgba,
             )
-        return (
-            f"\x1b_Ga=d,d=i,i={CURSOR_IMAGE_ID},p={PLACEMENT_ID},q=2\x1b\\"
-            f"{CSI}{row + 1};{column + 1}H"
-            f"\x1b_Ga=p,q=2,C=1,z=1,i={CURSOR_IMAGE_ID},p={PLACEMENT_ID},"
-            f"X={x_offset},Y={y_offset}\x1b\\"
-        ).encode()
+        output = bytearray(
+            self._graphics(
+                f"\x1b_Ga=d,d=i,i={CURSOR_IMAGE_ID},p={PLACEMENT_ID},q=2\x1b\\".encode()
+            )
+        )
+        output.extend(f"{CSI}{row + 1};{column + 1}H".encode())
+        output.extend(
+            self._graphics(
+                (
+                    f"\x1b_Ga=p,q=2,C=1,z=1,i={CURSOR_IMAGE_ID},p={PLACEMENT_ID},"
+                    f"X={x_offset},Y={y_offset}\x1b\\"
+                ).encode()
+            )
+        )
+        return bytes(output)

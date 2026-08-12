@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sshdesk"
-version = "0.2.1"
+version = "0.3.0"
 description = "A full interactive remote desktop delivered entirely through SSH"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,12 +23,17 @@ Issues = "https://github.com/rylena/sshdesk/issues"
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 fast = ["numpy>=1.24", "opencv-python-headless>=4.8"]
+macos = ["pyobjc-framework-Quartz>=10; platform_system == 'Darwin'"]
 
 [project.scripts]
 sshdesk = "sshdesk.cli:main"
 sshdesk-local = "sshdesk.cli:local_main"
 sshdesk-server = "sshdesk.cli:server_main"
 sshdesk-bench = "sshdesk.cli:bench_main"
+sshdesk-agent = "sshdesk.agent:agent_entrypoint"
+sshdesk-agent-ssh = "sshdesk.agent:agent_ssh_entrypoint"
+sshdesk-split = "sshdesk.client:split_entrypoint"
+sshdesk-remote = "sshdesk.client:remote_entrypoint"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

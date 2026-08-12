@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- add automatic X11/Wayland/Linux and native macOS/Windows platform selection
+- add wlroots, GNOME, and KDE Wayland capture plus ydotool input injection
+- add Quartz macOS and SendInput Windows input backends
+- add Windows virtual-terminal lifecycle and input handling
+- add authenticated `sshdesk-agent` observe/control commands with bounded session mode
+- add `sshdesk-remote` for safe computer-use calls through ordinary OpenSSH
+- add `sshdesk-split` tmux layout and Kitty graphics passthrough
+- allow only the constrained agent grammar through forced-command SSH accounts
+- expand tests, platform/security documentation, installers, and the README logo
+
 ## 0.2.1
 
 - keep capture fresh at the active rate so input never wakes a stale 2 FPS stream

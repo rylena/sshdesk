@@ -5,21 +5,21 @@ import os
 import shutil
 import sys
 
-from sshdesk.capture import SyntheticCapture
+from sshdesk.platform import create_capture
 from sshdesk.render import TerminalRenderer, TerminalWriter
 
 
 def _capture(name: str):
-    if name == "synthetic":
-        return SyntheticCapture()
-    from sshdesk.capture.x11 import X11Capture
-
-    return X11Capture()
+    return create_capture(name)
 
 
 def local_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render one desktop frame in this terminal")
-    parser.add_argument("--capture", choices=("x11", "synthetic"), default="x11")
+    parser.add_argument(
+        "--capture",
+        choices=("auto", "x11", "wayland", "native", "synthetic"),
+        default="auto",
+    )
     parser.add_argument("--once", action="store_true", help="render once and exit")
     parser.add_argument("--columns", type=int)
     parser.add_argument("--rows", type=int)

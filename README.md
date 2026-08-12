@@ -1,133 +1,118 @@
 # SSHDESK
 
+```text
+  ____  ____  _   _ ____  _____ ____  _  __
+ / ___|/ ___|| | | |  _ \| ____/ ___|| |/ /
+ \___ \\___ \| |_| | | | |  _| \___ \| ' /
+  ___) |___) |  _  | |_| | |___ ___) | . \
+ |____/|____/|_| |_|____/|_____|____/|_|\_\
+                   DESKTOP OVER SSH
+```
+
 [![Tests](https://github.com/rylena/sshdesk/actions/workflows/test.yml/badge.svg)](https://github.com/rylena/sshdesk/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > SSHDESK is a full interactive remote desktop delivered entirely through an SSH session and displayed directly inside your terminal.
 
-SSHDESK is a Linux/X11 MVP that works with an ordinary interactive SSH client.
-After OpenSSH authenticates the user, a forced command captures the active
-desktop, renders changed RGB tiles or ANSI cells, parses keyboard and mouse events
-from the SSH PTY, and injects them through XTest.
-
-The intended installed experience is exactly:
+Connect with the SSH client you already have:
 
 ```bash
 ssh desktop@example.com
 ```
 
-There is no browser, custom client, second login system, VNC/RDP listener, web
-server, or additional network port. OpenSSH remains responsible for
-authentication, encryption, host keys, PTY allocation, and connection handling.
+OpenSSH authenticates the user and launches SSHDESK as a forced command. The
+active graphical desktop then appears inside that same terminal. Keyboard,
+mouse, resize events, changed pixels, and session cleanup all travel through the
+one SSH PTY. There is no browser, custom SSH client, VNC/RDP listener, second
+password database, web server, or additional network port.
+
+Kitty, Ghostty, and WezTerm receive sharp real-pixel tiles. Every ordinary ANSI
+terminal receives the lower-resolution color-cell renderer, so OpenSSH, PuTTY,
+mobile clients, and embedded SSH terminals remain usable.
 
 > [!WARNING]
-> Anyone who can authenticate to the SSHDESK account can view and control the
-> active graphical desktop. Treat access as equivalent to physical console
-> access, and test a second administrative login before forcing SSHDESK on an
-> existing account.
+> Anyone who can authenticate to an SSHDESK account can see and control the
+> active graphical session. Treat it like physical console access. Keep a
+> second administrative login available while configuring a forced command.
 
-## Quick start on Ubuntu or Debian
+## Features
 
-This MVP targets an active X11 desktop. From the server:
+- full desktop viewing with changed-tile/cell updates and static-frame suppression
+- keyboard, Ctrl/Alt/Shift, arrows, navigation keys, and F1–F12
+- mouse movement, left/right/middle click, drag, and wheel scrolling
+- dynamic terminal resize with aspect-ratio-preserving viewport recalculation
+- persistent top bar and terminal title showing the connected device name
+- sharp zlib-compressed RGB tiles through Kitty graphics, including tmux passthrough
+- true-color, 256-color, 16-color, Unicode, and ASCII fallbacks
+- latest-frame scheduling that drops stale work instead of accumulating latency
+- 60 FPS sharp / 30 FPS ANSI active targets with adaptive idle presentation
+- live FPS, latency, capture, diff, bandwidth, and update instrumentation
+- agent-safe screenshot and computer-use commands carried through OpenSSH
+- optional tmux side-by-side layout for an agent shell and visual desktop
+- terminal restoration and held-input release after disconnects or crashes
+- X11, common Wayland desktop, macOS, and Windows backend abstractions
+
+## Linux installation
+
+SSHDESK's installer is distribution-independent. It needs Python 3.10+, a
+working Python `venv`, OpenSSH server, and the capture/input tools for the active
+display stack:
+
+| Linux session | Capture | Input |
+|---|---|---|
+| X11, any desktop | FFmpeg/XCB, MIT-SHM, or Pillow/XCB | XTest |
+| wlroots (Sway, Hyprland, etc.) | `grim` | `ydotool` + `ydotoold` |
+| GNOME Wayland | `gnome-screenshot` | `ydotool` + `ydotoold` |
+| KDE Plasma Wayland | `spectacle` | `ydotool` + `ydotoold` |
+
+Install those names with the distribution package manager. FFmpeg and
+NumPy/OpenCV are acceleration paths; SSHDESK falls back when they are absent.
+Wayland input requires `ydotoold` to have access to `/dev/uinput`; do not run the
+whole SSHDESK server as root.
+
+From the repository on the server:
 
 ```bash
-sudo apt install openssh-server python3 python3-venv python3-pil \
-  python3-xlib libxtst6 libxext6 ffmpeg
-git clone https://github.com/rylena/sshdesk.git
-cd sshdesk
-
 sudo ./scripts/install-server.sh \
   "$USER" "$DISPLAY" "${XAUTHORITY:-$HOME/.Xauthority}"
+
 ./scripts/configure-sshd.sh "$USER" |
   sudo tee "/etc/ssh/sshd_config.d/90-sshdesk-$USER.conf"
 sudo sshd -t
-sudo systemctl reload ssh
+sudo systemctl reload ssh  # some distributions call this service sshd
 ```
 
-Then connect from any ordinary interactive SSH client:
+Use the active display value (`:0`, `:1`, and so on). On Wayland, preserve the
+logged-in graphical user's session variables when running the installer:
+
+```bash
+sudo --preserve-env=WAYLAND_DISPLAY,XDG_RUNTIME_DIR,XDG_SESSION_TYPE,\
+XDG_CURRENT_DESKTOP,DBUS_SESSION_BUS_ADDRESS,YDOTOOL_SOCKET \
+  ./scripts/install-server.sh "$USER" "${DISPLAY:-}" "${XAUTHORITY:-}"
+```
+
+This records the compositor, runtime, D-Bus, and ydotool settings. Check the
+resulting root-owned `/etc/sshdesk/USER.conf` before enabling the forced command.
+
+Verify backend access first:
+
+```bash
+/usr/local/bin/sshdesk-server --check
+```
+
+Then connect from another terminal:
 
 ```bash
 ssh user@server
 ```
 
-Ghostty, kitty, and WezTerm use the sharp real-pixel renderer. Other terminals
-automatically receive the lower-resolution ANSI fallback. Press
-`Ctrl+] Ctrl+]` to leave SSHDESK.
+A PTY is required; `ssh -T` cannot display an interactive desktop. Press
+`Ctrl+] Ctrl+]` to leave.
 
-## What works
+### Dedicated SSH account
 
-- active X11 desktop capture at its detected resolution
-- continuously drained FFmpeg/XCB capture with renderer-sized scaling
-- current-frame MIT-SHM and Pillow/XCB capture fallbacks
-- real-pixel rendering through the Kitty graphics protocol on kitty, Ghostty,
-  and WezTerm, selected by a live capability probe
-- automatic ANSI half-block fallback on terminals without image support
-- zlib-compressed ~96×96 image tiles with changed-tile retransmission
-- full frames, cell deltas, and unchanged-frame suppression
-- keyboard, Ctrl/Alt/Shift combinations, arrows, navigation, and F1–F12
-- mouse movement, left/right/middle clicks, dragging, and scrolling
-- SGR mouse reports with legacy X10 fallback
-- dynamic SSH terminal resizing without disconnecting
-- aspect-ratio-preserving scaling and letterboxing
-- true-color, 256-color, 16-color, and ASCII rendering fallbacks
-- independently processed input so slow frame output does not starve controls
-- latest-frame scheduling that drops stale work instead of building latency
-- capture-level fingerprints that bypass rendering for identical frames
-- adaptive 60 FPS sharp / 30 FPS ANSI active, 30 FPS light, and 2 FPS idle presentation
-- immediate input wake-up without restarting a low-rate capture process
-- a persistent device-name header and matching terminal window title
-- cursor-only updates and an optional performance overlay
-- terminal restoration and XTest button/key release after disconnects and errors
-- a synthetic desktop for headless tests and benchmarks
-
-Current limitations: X11 only; no clipboard or audio; polling is used instead
-of XDamage wakeups; Unicode injection depends on the X keyboard map;
-and real-pixel graphics require a Kitty-protocol terminal. PipeWire and Wayland
-input backends remain future work.
-
-The MVP is implemented in Python for immediate portability and iteration. A
-production high-throughput core should eventually move capture, rendering, and
-input to Rust without replacing OpenSSH or changing the user experience.
-
-## Server requirements
-
-- Ubuntu/Debian Linux with an active X11 desktop
-- OpenSSH server
-- Python 3.10 or later
-- Pillow, python-xlib, and the XTest extension
-- optional NumPy/OpenCV for the fastest native framebuffer scaling
-- a normal terminal client with ANSI cursor addressing
-- optionally kitty, Ghostty, or WezTerm for sharp real-pixel graphics
-
-Install system dependencies:
-
-```bash
-sudo apt install openssh-server python3 python3-venv python3-pil \
-  python3-xlib libxtst6 libxext6 ffmpeg
-```
-
-For the accelerated scaling path, install the `fast` Python extra in a virtual
-environment or otherwise provide `numpy` and `cv2`. SSHDESK automatically falls
-back to Pillow scaling if they are unavailable.
-
-The server process must run as the user who owns the graphical desktop so it can
-access the correct `DISPLAY` and Xauthority cookie. The SSH login may either be
-that user or a dedicated account.
-
-## Install for plain `ssh user@host`
-
-From this repository on the server:
-
-```bash
-sudo ./scripts/install-server.sh desktop :0 /home/desktop/.Xauthority
-./scripts/configure-sshd.sh desktop |
-  sudo tee /etc/ssh/sshd_config.d/90-sshdesk-desktop.conf
-sudo sshd -t
-sudo systemctl reload ssh
-```
-
-To preserve the desktop owner's normal shell, create a dedicated SSH account
-and pass the desktop owner as the fourth argument:
+To preserve a desktop owner's normal SSH shell, use a dedicated login and run
+only the tightly scoped server/agent entry points as the graphical user:
 
 ```bash
 sudo useradd --create-home --shell /bin/bash sshdesk
@@ -135,127 +120,136 @@ sudo ./scripts/install-server.sh \
   sshdesk :0 /home/alice/.Xauthority alice
 ./scripts/configure-sshd.sh sshdesk |
   sudo tee /etc/ssh/sshd_config.d/90-sshdesk.conf
+sudo sshd -t && sudo systemctl reload ssh
 ```
 
-In this form the installer creates a narrow sudoers rule: the `sshdesk` account
-may run only `/usr/local/bin/sshdesk-server`, without arguments, as `alice`.
-OpenSSH still performs all authentication.
+The generated sudoers rule does not grant root. OpenSSH remains the only
+authentication system.
 
-Use the actual display value; it may be `:1` rather than `:0`. Before enabling
-the `ForceCommand`, verify access from the server:
+## Agent computer use and side-by-side work
+
+The forced-command account accepts a small fixed `sshdesk-agent` command set in
+addition to the interactive desktop. It never evaluates a received shell
+string. Examples:
 
 ```bash
-sudo -u desktop env DISPLAY=:0 XAUTHORITY=/home/desktop/.Xauthority \
-  /usr/local/bin/sshdesk-server --check
+ssh user@server sshdesk-agent info
+ssh user@server sshdesk-agent screenshot --max-width 1280 > desktop.png
+ssh user@server sshdesk-agent move 900 500
+ssh user@server sshdesk-agent click 900 500 --button left
+ssh user@server sshdesk-agent scroll -3 900 500
+ssh user@server sshdesk-agent type hello
+ssh user@server sshdesk-agent key enter
 ```
 
-Ensure SSH authentication for the account works before installing its forced
-command. SSHDESK does not create passwords, keys, or another authentication
-database. Keep OpenSSH's global `PermitUserEnvironment no` default.
-
-Now connect from an unmodified Linux, macOS, Windows, PuTTY, mobile, or other
-interactive SSH client:
+For reliable quoting and machine-readable responses, install SSHDESK locally
+and use `sshdesk-remote`. It sends bounded newline-delimited JSON to the fixed
+remote command:
 
 ```bash
-ssh desktop@example.com
+sshdesk-remote user@server info
+sshdesk-remote user@server screenshot --output desktop.png
+sshdesk-remote user@server click 900 500
+sshdesk-remote user@server type 'text with spaces'
 ```
 
-A normal interactive invocation requests a PTY automatically. Clients configured
-to disable PTYs must enable their interactive terminal; `ssh -T` cannot display
-SSHDESK.
-
-## Development run
-
-Create a local environment without modifying sshd:
+Long-running agents can avoid process setup for every action:
 
 ```bash
-python3 -m venv .venv --system-site-packages
-. .venv/bin/activate
-python -m pip install --no-build-isolation -e '.[fast,dev]'
-
-sshdesk-server --capture synthetic --no-input
-sshdesk-server --capture x11
+sshdesk-remote user@server session
+{"id":1,"action":"observe","max_width":1280}
+{"id":2,"action":"click","x":900,"y":500,"button":"left"}
+{"id":3,"action":"type","text":"hello"}
+{"id":4,"action":"quit"}
 ```
 
-Exit with `Ctrl+] Ctrl+]`.
+To place a local agent shell beside the remote visual desktop, install `tmux`
+and run:
 
-## Controls
+```bash
+sshdesk-split user@server
+```
 
-- Type normally to send keyboard input to the desktop.
-- Use the terminal mouse for movement, clicks, drag, and wheel scrolling.
-- `Ctrl+S` toggles statistics. Most terminals cannot distinguish
-  `Ctrl+Shift+S` from `Ctrl+S`.
-- `Ctrl+] Ctrl+]` always exits SSHDESK locally and is not injected remotely.
-- Resizing the terminal recalculates the viewport and causes a full redraw.
+The right pane is the normal SSHDESK connection; the left pane is available to
+your agent or shell and can call `sshdesk-remote`. These optional automation
+commands are also ordinary authenticated SSH sessions. Standard OpenSSH
+`ControlMaster` configuration can multiplex them over an existing connection;
+SSHDESK never opens another service or port.
 
-If automatic terminal detection is too conservative, edit the root-owned
-`/etc/sshdesk/USER.conf` created by the installer:
+## Controls and tuning
+
+- type normally to send keyboard input
+- use the terminal mouse for movement, clicks, drag, and scrolling
+- `Ctrl+S` toggles statistics (most terminals cannot distinguish `Ctrl+Shift+S`)
+- `Ctrl+] Ctrl+]` always exits locally and is never injected
+- terminal resizing triggers a new viewport and full redraw without disconnecting
+
+The installer writes safe defaults to `/etc/sshdesk/USER.conf`:
 
 ```text
 SSHDESK_RENDER=auto
-SSHDESK_COLOR=truecolor
+SSHDESK_COLOR=auto
 SSHDESK_MOUSE=auto
 SSHDESK_UNICODE=auto
 SSHDESK_X11_CAPTURE=auto
 SSHDESK_MAX_FPS=auto
 ```
 
-See [client compatibility](docs/compatibility.md) for fallbacks.
+`SSHDESK_RENDER=kitty` requires sharp graphics; `ansi` forces the universal
+fallback. `SSHDESK_X11_CAPTURE=auto` tries continuously drained FFmpeg/XCB,
+then MIT-SHM, then Pillow/XCB. `SSHDESK_MAX_FPS` accepts 1–120.
 
-`SSHDESK_RENDER=auto` probes the connected terminal and chooses real pixels when
-supported. Set it to `kitty` to require sharp mode or `ansi` to force the
-universal fallback. This setting changes only terminal rendering; the connection
-is still ordinary SSH.
+## macOS and Windows
 
-`SSHDESK_X11_CAPTURE=auto` prefers a continuously drained FFmpeg/XCB stream,
-then current-frame MIT-SHM, then Pillow/XCB. Use `ffmpeg`, `xshm`, or `pillow`
-to require a backend for diagnostics.
-
-`SSHDESK_MAX_FPS=auto` targets 60 FPS for sharp terminal pixels and 30 FPS for
-ANSI. Set a numeric value from 1 through 120 to override it. Higher rates require
-enough CPU, terminal rendering speed, and network bandwidth; SSHDESK always
-retains only the newest frame so a slow link cannot create a stale-frame queue.
-Capture remains fresh at the active rate while presentation backs off on an
-unchanged desktop, so the first input after an idle period is not delayed.
-
-## Architecture
-
-Capture, rendering, input injection, terminal encoding, session lifecycle, and
-statistics are separate modules. OpenSSH launches only `sshdesk-server` and
-carries its PTY byte stream over one connection. See
-[architecture](docs/architecture.md) and
-[security](docs/security.md).
-
-## Documentation
-
-- [Architecture and data flow](docs/architecture.md)
-- [Client and terminal compatibility](docs/compatibility.md)
-- [Security and permissions](docs/security.md)
-- [Benchmark methodology](docs/benchmark.md)
-- [Changelog](CHANGELOG.md)
-
-## Test and benchmark
-
-The test suite does not require a graphical desktop:
+Linux is the primary, fully integrated OpenSSH host. Native Pillow capture plus
+Quartz input on macOS and SendInput on Windows are available for development and
+manually launched sessions:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
-  python -m unittest discover -s tests -v
+./scripts/install-macos.sh
+powershell -ExecutionPolicy Bypass -File scripts/install-windows.ps1
 ```
 
-Check the live X11 backend separately:
+macOS requires Screen Recording and Accessibility permission for the installed
+Python process. Windows hosting must execute inside the logged-in interactive
+desktop; the normal Windows OpenSSH service may be isolated in Session 0, so
+forced-command hosting there is experimental. Linux/macOS/Windows terminals are
+all supported as clients because the visual protocol remains standard terminal
+output over SSH.
+
+See [platform support](docs/platforms.md) for exact backend behavior.
+
+## Development, tests, and benchmark
 
 ```bash
-DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority" sshdesk-server --check
+python3 -m venv .venv --system-site-packages
+. .venv/bin/activate
+python -m pip install -e '.[fast,dev]'
+
+sshdesk-server --capture synthetic --no-input
+python -m unittest discover -s tests -v
+ruff check src tests
 ```
 
-Benchmark exact terminal output bytes:
+Benchmark exact rendered terminal bytes:
 
 ```bash
 sshdesk-bench --duration 60 --columns 100 --rows 30 --color 256
 ```
 
-See the [benchmark methodology](docs/benchmark.md).
+Python keeps platform integration and iteration straightforward today. Capture,
+rendering, input, session management, and terminal output are separate modules,
+so performance-critical pieces can move to Rust later without changing the
+OpenSSH user experience.
+
+## Documentation
+
+- [Architecture and data flow](docs/architecture.md)
+- [Platform support](docs/platforms.md)
+- [Client and terminal compatibility](docs/compatibility.md)
+- [Security and permissions](docs/security.md)
+- [Benchmark methodology](docs/benchmark.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
@@ -263,6 +257,6 @@ MIT
 
 ## Acknowledgements
 
-The sharp rendering path follows the same core idea demonstrated by
-[Desktui](https://github.com/mishushakov/desktui): use terminal image pixels and
-changed image tiles instead of treating character cells as the display pixels.
+The sharp renderer builds on the idea demonstrated by
+[Desktui](https://github.com/mishushakov/desktui): terminal image pixels and
+changed tiles can preserve far more desktop detail than character art.

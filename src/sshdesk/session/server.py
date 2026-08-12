@@ -8,12 +8,15 @@ from dataclasses import dataclass
 from sshdesk.capture.base import ScreenCapture
 from sshdesk.capture.synthetic import SyntheticCapture
 from sshdesk.input.base import InputBackend, NullInputBackend
+from sshdesk.platform import create_capture as create_platform_capture
+from sshdesk.platform import create_input as create_platform_input
 from sshdesk.render import TerminalCapabilities
 
 
 @dataclass(frozen=True, slots=True)
 class ServerConfig:
-    capture: str = "x11"
+    capture: str = "auto"
+    input: str = "auto"
     display: str | None = None
     input_enabled: bool = True
     synthetic_animate: bool = True
@@ -22,17 +25,13 @@ class ServerConfig:
 def create_capture(config: ServerConfig) -> ScreenCapture:
     if config.capture == "synthetic":
         return SyntheticCapture(1280, 720, config.synthetic_animate)
-    from sshdesk.capture.x11 import X11Capture
-
-    return X11Capture(config.display)
+    return create_platform_capture(config.capture, config.display)
 
 
 def create_input(config: ServerConfig) -> InputBackend:
     if not config.input_enabled or config.capture == "synthetic":
         return NullInputBackend()
-    from sshdesk.input.x11 import X11Input
-
-    return X11Input(config.display)
+    return create_platform_input(config.input, config.display)
 
 
 def _capabilities(args: argparse.Namespace) -> TerminalCapabilities:
@@ -50,7 +49,16 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Serve the active desktop directly in an ordinary SSH terminal"
     )
-    parser.add_argument("--capture", choices=("x11", "synthetic"), default="x11")
+    parser.add_argument(
+        "--capture",
+        choices=("auto", "x11", "wayland", "native", "synthetic"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--input",
+        choices=("auto", "x11", "ydotool", "quartz", "sendinput", "none"),
+        default="auto",
+    )
     parser.add_argument("--display", help="X11 display (defaults to DISPLAY)")
     parser.add_argument("--no-input", action="store_true", help="view-only session")
     parser.add_argument("--synthetic-static", action="store_true")
@@ -65,11 +73,12 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="verify X11 capture and input access without starting a terminal session",
+        help="verify capture and input access without starting a terminal session",
     )
     args = parser.parse_args(argv)
     config = ServerConfig(
         capture=args.capture,
+        input=args.input,
         display=args.display,
         input_enabled=not args.no_input,
         synthetic_animate=not args.synthetic_static,
@@ -82,7 +91,8 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
         if args.check:
             frame = capture.capture()
             print(
-                f"SSHDESK check passed: {frame.width}x{frame.height} {config.capture} capture; "
+                f"SSHDESK check passed: {frame.width}x{frame.height} "
+                f"{type(capture).__name__} capture; "
                 f"input={'enabled' if config.input_enabled else 'disabled'}"
             )
             return 0

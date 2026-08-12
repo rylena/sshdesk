@@ -4,6 +4,7 @@ import base64
 import re
 import unittest
 import zlib
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -20,6 +21,7 @@ from sshdesk.render import (
     parse_graphics_probe,
 )
 from sshdesk.render.base import UpdateKind
+from sshdesk.render.probe import tmux_passthrough
 
 
 class RenderTests(unittest.TestCase):
@@ -207,6 +209,22 @@ class RenderTests(unittest.TestCase):
         payload = b"".join(data for keys, data in commands if b"a=T" in keys or keys.startswith(b"m="))
         decoded = zlib.decompress(base64.b64decode(payload))
         self.assertEqual(decoded, frame.tiles[0].rgb)
+
+    def test_kitty_graphics_are_wrapped_for_tmux(self) -> None:
+        renderer = KittyRenderer(self.graphics_probe())
+        frame = renderer.render(SyntheticCapture(160, 90, False).capture(), 20, 8)
+        with patch.dict("os.environ", {"TMUX": "/tmp/tmux,1,0"}):
+            writer = KittyWriter(
+                TerminalCapabilities("xterm-kitty", ColorMode.TRUECOLOR, True, True, True),
+                self.graphics_probe(),
+            )
+        output = writer._place_rgb(frame.tiles[0])
+        self.assertTrue(output.startswith(b"\x1bPtmux;\x1b\x1b_G"))
+        self.assertIn(b"\x1b\\", output)
+        self.assertEqual(
+            tmux_passthrough(b"\x1b_Gi=1;OK\x1b\\"),
+            b"\x1bPtmux;\x1b\x1b_Gi=1;OK\x1b\x1b\\\x1b\\",
+        )
 
 
 if __name__ == "__main__":

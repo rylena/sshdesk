@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from sshdesk.agent import (
+    AgentController,
+    _session_action,
+    agent_ssh_entrypoint,
+)
+from sshdesk.capture.synthetic import SyntheticCapture
+from sshdesk.client import _remote_request, _split_arguments
+from sshdesk.input.base import InputBackend
+from sshdesk.input.events import KeyCode, KeyEvent, Modifiers
+from sshdesk.input.ydotool import YdotoolInput
+from sshdesk.platform import detect_platform
+
+
+class RecordingInput(InputBackend):
+    def __init__(self) -> None:
+        self.events: list[tuple[object, ...]] = []
+
+    def key(self, event: KeyEvent) -> None:
+        self.events.append(("key", event))
+
+    def move(self, x: int, y: int) -> None:
+        self.events.append(("move", x, y))
+
+    def button(self, button: int, pressed: bool, x: int, y: int) -> None:
+        self.events.append(("button", button, pressed, x, y))
+
+    def scroll(self, amount: int, x: int, y: int) -> None:
+        self.events.append(("scroll", amount, x, y))
+
+
+class AgentTests(unittest.TestCase):
+    def controller(self) -> tuple[AgentController, RecordingInput]:
+        controller = AgentController()
+        backend = RecordingInput()
+        controller._capture = SyntheticCapture(320, 180, animate=False)
+        controller._input = backend
+        return controller, backend
+
+    def test_observe_and_computer_use_actions(self) -> None:
+        controller, backend = self.controller()
+        result = _session_action(controller, {"action": "observe", "max_width": 160})
+        self.assertEqual((result["width"], result["height"]), (320, 180))
+        self.assertTrue(str(result["image_base64"]).startswith("iVBOR"))
+
+        _session_action(controller, {"action": "click", "x": 12, "y": 34})
+        _session_action(controller, {"action": "scroll", "amount": -3, "x": 12, "y": 34})
+        _session_action(controller, {"action": "type", "text": "Hi"})
+        _session_action(controller, {"action": "key", "key": "enter", "ctrl": True})
+        self.assertIn(("button", 1, True, 12, 34), backend.events)
+        self.assertIn(("button", 1, False, 12, 34), backend.events)
+        self.assertIn(("scroll", -3, 12, 34), backend.events)
+        self.assertEqual(
+            [event[1].unicode for event in backend.events if event[0] == "key"][:2],
+            [ord("H"), ord("i")],
+        )
+        last = backend.events[-1][1]
+        self.assertEqual(last.key_code, int(KeyCode.ENTER))
+        self.assertEqual(last.modifiers, int(Modifiers.CTRL))
+
+    def test_agent_rejects_untrusted_shell_commands(self) -> None:
+        self.assertEqual(agent_ssh_entrypoint(["id"]), 126)
+        self.assertEqual(agent_ssh_entrypoint(["sshdesk-agent info; id"]), 2)
+        self.assertEqual(agent_ssh_entrypoint(["sshdesk-agent && id"]), 2)
+        self.assertEqual(
+            agent_ssh_entrypoint(["sshdesk-agent screenshot --output /tmp/capture.png"]),
+            2,
+        )
+
+    def test_actions_are_bounded(self) -> None:
+        controller, _backend = self.controller()
+        with self.assertRaisesRegex(ValueError, "coordinate"):
+            _session_action(controller, {"action": "move", "x": 999999, "y": 0})
+        with self.assertRaisesRegex(ValueError, "button"):
+            _session_action(
+                controller,
+                {"action": "click", "x": 0, "y": 0, "button": "extra"},
+            )
+
+    def test_ydotool_adds_shift_for_uppercase(self) -> None:
+        backend = object.__new__(YdotoolInput)
+        backend._pressed_buttons = set()
+        backend._pressed_keys = set()
+        calls: list[tuple[str, ...]] = []
+        backend._run = lambda *values: calls.append(values)
+        backend.key(KeyEvent(2, 0, int(KeyCode.CHARACTER), ord("A")))
+        self.assertIn("42:1", calls[0])
+        self.assertIn("42:0", calls[0])
+
+    def test_platform_selects_x11_and_wayland(self) -> None:
+        with patch("sshdesk.platform.platform.system", return_value="Linux"), patch.dict(
+            "os.environ", {"DISPLAY": ":1", "XDG_SESSION_TYPE": "x11"}, clear=True
+        ):
+            self.assertEqual(detect_platform().capture, "x11")
+        with patch("sshdesk.platform.platform.system", return_value="Linux"), patch.dict(
+            "os.environ",
+            {"DISPLAY": ":1", "WAYLAND_DISPLAY": "wayland-0", "XDG_SESSION_TYPE": "wayland"},
+            clear=True,
+        ):
+            selected = detect_platform()
+            self.assertEqual((selected.capture, selected.input), ("wayland", "ydotool"))
+        with patch("sshdesk.platform.platform.system", return_value="Darwin"):
+            self.assertEqual((detect_platform().capture, detect_platform().input), ("native", "quartz"))
+        with patch("sshdesk.platform.platform.system", return_value="Windows"):
+            self.assertEqual(
+                (detect_platform().capture, detect_platform().input),
+                ("native", "sendinput"),
+            )
+
+    def test_split_command_is_an_argument_vector(self) -> None:
+        self.assertEqual(
+            _split_arguments("alice@example.com", "right", 50, "%3"),
+            ["split-window", "-h", "-p", "50", "-t", "%3", "--", "ssh", "alice@example.com"],
+        )
+
+    def test_remote_request_uses_only_fixed_ssh_command(self) -> None:
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=b'{"id":1,"ok":true,"width":320}\n',
+            stderr=b"",
+        )
+        with patch("sshdesk.client.shutil.which", return_value="/usr/bin/ssh"), patch(
+            "sshdesk.client.subprocess.run", return_value=completed
+        ) as run:
+            response = _remote_request("alice@example.com", {"id": 1, "action": "info"})
+        self.assertEqual(response["width"], 320)
+        self.assertEqual(
+            run.call_args.args[0],
+            ["/usr/bin/ssh", "alice@example.com", "sshdesk-agent", "session"],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

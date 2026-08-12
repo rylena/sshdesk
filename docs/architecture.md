@@ -10,15 +10,20 @@ normal SSH client and terminal
           ▼
 OpenSSH sshd ── ForceCommand ── sshdesk-server
                                   ├── ScreenCapture
-                                  │   └── X11Capture
-                                  │       ├── FFmpeg/XCB
-                                  │       ├── MIT-SHM fallback
-                                  │       └── Pillow/XCB fallback
+                                  │   ├── X11Capture
+                                  │   │   ├── FFmpeg/XCB
+                                  │   │   ├── MIT-SHM fallback
+                                  │   │   └── Pillow/XCB fallback
+                                  │   ├── WaylandCapture
+                                  │   └── NativeCapture (macOS/Windows)
                                   ├── Renderer
                                   │   ├── KittyRenderer
                                   │   └── TerminalRenderer (fallback)
                                   ├── InputBackend
-                                  │   └── X11Input
+                                  │   ├── X11Input
+                                  │   ├── YdotoolInput
+                                  │   ├── MacOSInput
+                                  │   └── WindowsInput
                                   └── SessionStats
 ```
 
@@ -26,9 +31,10 @@ OpenSSH owns authentication, encryption, host keys, PTY allocation, window-size
 messages, connection management, and network transport. SSHDESK does not
 implement SSH, listen on a port, or define client credentials.
 
-`ScreenCapture`, `Renderer`, and `InputBackend` are independent. A future
-PipeWire capture backend and compositor-specific Wayland input backend can be
-added without changing the SSH session or terminal renderer.
+`ScreenCapture`, `Renderer`, and `InputBackend` are independent. Linux selects
+X11 or Wayland automatically; native macOS and Windows implementations use the
+same interfaces. A future PipeWire backend can replace the command-based
+Wayland capture implementation without changing the SSH session or renderers.
 
 The session probes terminal graphics and pixel geometry before starting its input
 thread. A capable terminal receives zlib-compressed RGB tiles through the Kitty
@@ -52,3 +58,21 @@ from 1 through 120 FPS.
 There is deliberately no SSHDESK application transport or client binary. An
 unmodified SSH client carries one PTY byte stream. Kitty graphics, ANSI/UTF-8,
 keyboard reports, and mouse reports are terminal protocols inside that stream.
+
+## Agent path
+
+Agent computer use is an optional, low-frequency control path. OpenSSH invokes
+the fixed `sshdesk-agent` command without a PTY. Requests are bounded
+newline-delimited JSON because they are infrequent control operations; PNG
+observations are base64 encoded in responses. The desktop's interactive frame
+path remains the direct terminal stream and never uses JSON.
+
+```text
+agent ── sshdesk-remote ── OpenSSH ── sshdesk-agent session
+                                      ├── ScreenCapture
+                                      └── InputBackend
+```
+
+The forced-command dispatcher accepts only the basename `sshdesk-agent`, parses
+arguments without a shell, and rejects every other original command. Standard
+OpenSSH connection multiplexing can reuse a transport for repeated agent calls.
