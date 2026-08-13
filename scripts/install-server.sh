@@ -107,14 +107,18 @@ else
     rm -f "${sudoers}"
 fi
 
-echo
-echo "Installed SSHDESK. Add the following to sshd_config:"
-echo
-"${script_dir}/configure-sshd.sh" "${account}"
-echo
-echo "Then validate and reload OpenSSH:"
-echo "  sudo sshd -t"
-echo "  sudo systemctl reload ssh"
-echo
-echo "Verify desktop access before enabling ForceCommand:"
-echo "  sudo -u ${run_as} DISPLAY='${display}' XAUTHORITY='${xauthority}' sshdesk-server --check"
+if [ "${SSHDESK_BOOTSTRAP-0}" = "1" ]; then
+    echo "Installed SSHDESK application files."
+else
+    echo
+    echo "Installed SSHDESK. Add the following to sshd_config:"
+    echo
+    "${script_dir}/configure-sshd.sh" "${account}"
+    echo
+    echo "Then validate and reload OpenSSH:"
+    echo "  sudo sshd -t"
+    echo "  sudo systemctl reload ssh"
+    echo
+    echo "Verify desktop access before enabling ForceCommand:"
+    echo "  sudo -u ${run_as} DISPLAY='${display}' XAUTHORITY='${xauthority}' sshdesk-server --check"
+fi

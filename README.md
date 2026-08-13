@@ -54,6 +54,36 @@ mobile clients, and embedded SSH terminals remain usable.
 
 ## Linux installation
 
+Install and configure SSHDESK with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rylena/sshdesk/main/scripts/install.sh | sh
+```
+
+The installer detects the graphical user, installs missing Python/OpenSSH
+prerequisites, installs SSHDESK, validates the forced-command configuration,
+and starts OpenSSH. At the very end it asks whether to install and start
+Tailscale. Answering yes runs Tailscale's official Linux installer, starts
+`tailscaled`, and runs `tailscale up` to display its login link. This carries
+normal OpenSSH over the private tailnet; it does not replace OpenSSH or enable a
+second SSH authentication mode.
+
+> [!NOTE]
+> A one-line installer executes downloaded code with `sudo` during setup. Review
+> [scripts/install.sh](scripts/install.sh) first if that is not appropriate for
+> the machine. Use `--user USER` when automatic desktop-user detection is wrong.
+
+For unattended installs, download the script and use `--tailscale` or
+`--no-tailscale`:
+
+```bash
+curl -fsSLo /tmp/sshdesk-install.sh \
+  https://raw.githubusercontent.com/rylena/sshdesk/main/scripts/install.sh
+sh /tmp/sshdesk-install.sh --user alice --no-tailscale
+```
+
+### Manual installation
+
 SSHDESK's installer is distribution-independent. It needs Python 3.10+, a
 working Python `venv`, OpenSSH server, and the capture/input tools for the active
 display stack:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- add a one-line Linux bootstrap installer
+- detect and install missing Python/OpenSSH prerequisites across common distributions
+- configure, validate, and start OpenSSH automatically
+- optionally install, start, and connect Tailscale after SSHDESK setup
+
 ## 0.3.0
 
 - add automatic X11/Wayland/Linux and native macOS/Windows platform selection
