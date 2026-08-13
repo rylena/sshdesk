@@ -56,6 +56,10 @@ class YdotoolInput(InputBackend):
         self.executable = executable
         self._pressed_buttons: set[int] = set()
         self._pressed_keys: set[int] = set()
+        # `debug` only asks the daemon for its device information; it does not
+        # inject an event. Checking here makes `sshdesk-server --check` verify
+        # the socket and its permissions, not merely the client executable.
+        self._run("debug")
 
     def _run(self, *arguments: str) -> None:
         result = subprocess.run(

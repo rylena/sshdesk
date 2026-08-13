@@ -36,9 +36,12 @@ other clients. SSHDESK uses tools already designed for the active compositor:
 
 The graphical user's `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`, desktop, and D-Bus
 environment must reach the forced command. The installer records these when it
-is run from that graphical session. Configure ydotool with the distribution's
-service/device rules and grant only the required user access; do not run
-SSHDESK itself as root.
+is run from that graphical session. The one-line installer detects the desktop,
+installs its capture command, and creates `sshdesk-ydotoold.service`. The helper
+alone opens `/dev/uinput`; its Unix socket is mode 0600 and owned by the desktop
+user. SSHDESK itself stays unprivileged. On an existing installation, rerun the
+one-line installer locally from the graphical session to repair missing Wayland
+dependencies and revalidate capture.
 
 Command-based GNOME/KDE capture is functional but slower than X11 or grim. A
 PipeWire backend is the intended high-throughput replacement. Compositors that

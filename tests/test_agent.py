@@ -97,6 +97,14 @@ class AgentTests(unittest.TestCase):
         self.assertIn("42:1", calls[0])
         self.assertIn("42:0", calls[0])
 
+    def test_ydotool_checks_daemon_without_injecting_input(self) -> None:
+        completed = SimpleNamespace(returncode=0, stderr=b"")
+        with patch("sshdesk.input.ydotool.shutil.which", return_value="/usr/bin/ydotool"), patch(
+            "sshdesk.input.ydotool.subprocess.run", return_value=completed
+        ) as run:
+            YdotoolInput()
+        self.assertEqual(run.call_args.args[0], ["/usr/bin/ydotool", "debug"])
+
     def test_platform_selects_x11_and_wayland(self) -> None:
         with patch("sshdesk.platform.platform.system", return_value="Linux"), patch.dict(
             "os.environ", {"DISPLAY": ":1", "XDG_SESSION_TYPE": "x11"}, clear=True

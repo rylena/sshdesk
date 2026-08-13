@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4
+
+- detect GNOME, KDE Plasma, and wlroots Wayland sessions during installation
+- install the matching screenshot dependency automatically
+- provision a pinned, checksum-verified ydotool input helper and restricted systemd service
+- verify a real desktop frame and ydotool socket access before configuring OpenSSH
+- document how to repair older Wayland installations by rerunning the installer
+
 ## 0.3.3
 
 - make package license metadata compatible with older distribution `setuptools`

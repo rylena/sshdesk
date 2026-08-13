@@ -31,6 +31,26 @@ class InstallerTests(unittest.TestCase):
         self.assertLess(source.rindex("start_openssh\n"), source.rindex("prompt_tailscale\n"))
         self.assertLess(source.rindex("prompt_tailscale\n"), source.rindex("install_tailscale\n"))
 
+    def test_wayland_dependencies_are_installed_and_checked_before_openssh(self) -> None:
+        source = INSTALLER.read_text()
+        self.assertIn('gnome) executable="gnome-screenshot"', source)
+        self.assertIn('kde) executable="spectacle"', source)
+        self.assertIn('wlroots) executable="grim"', source)
+        self.assertIn('YDOTOOL_VERSION="1.0.4"', source)
+        self.assertIn('YDOTOOL_SHA256="daa83507', source)
+        self.assertIn('YDOTOOL_SOURCE_SHA256="ba075a43', source)
+        self.assertIn("DeviceAllow=/dev/uinput rw", source)
+        self.assertIn("/etc/modules-load.d/sshdesk-uinput.conf", source)
+        self.assertIn("--socket-perm=0600", source)
+        self.assertIn('"${ydotool_cli}" debug', source)
+        dependency_install = source.rindex("    install_linux_desktop_dependencies\n")
+        application_install = source.rindex('    "${project_directory}/scripts/install-server.sh"')
+        desktop_check = source.rindex('say "Verifying graphical capture and input access..."')
+        openssh_config = source.rindex('sshd_main="/etc/ssh/sshd_config"')
+        self.assertLess(dependency_install, application_install)
+        self.assertLess(application_install, desktop_check)
+        self.assertLess(desktop_check, openssh_config)
+
 
 class WindowsInstallerTests(unittest.TestCase):
     def test_windows_bootstrap_downloads_configures_and_prompts_last(self) -> None:

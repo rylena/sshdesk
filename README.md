@@ -70,12 +70,14 @@ needed:
 ```
 
 Both one-line entry points detect the OS, install missing Python/OpenSSH
-prerequisites, install SSHDESK, validate the forced-command configuration, and
-start the platform's OpenSSH service. They support common Linux distributions,
-macOS, and Windows 10/11. The installer asks whether to install and start
-Tailscale only after SSHDESK and OpenSSH setup succeeds. Tailscale carries
-normal OpenSSH over the private tailnet; it does not replace OpenSSH or add a
-second SSH authentication mode.
+prerequisites, install SSHDESK, validate graphical access and the forced-command
+configuration, and start the platform's OpenSSH service. On Wayland, the Linux
+installer detects GNOME, KDE Plasma, or wlroots, installs its capture command,
+and provisions a checksum-verified `ydotoold` input helper. They support common
+Linux distributions, macOS, and Windows 10/11. The installer asks whether to
+install and start Tailscale only after SSHDESK and OpenSSH setup succeeds.
+Tailscale carries normal OpenSSH over the private tailnet; it does not replace
+OpenSSH or add a second SSH authentication mode.
 
 > [!IMPORTANT]
 > Cross-platform installation does not remove OS security boundaries. macOS
@@ -107,6 +109,15 @@ script block:
 & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/rylena/sshdesk/main/scripts/install.ps1'))) -NoTailscale
 ```
 
+### Repairing a Wayland installation
+
+If an older installation closes with `Wayland capture needs grim,
+gnome-screenshot, or spectacle`, log into that computer's graphical desktop,
+open its local terminal, and rerun the Linux/macOS one-line command above. It
+installs the correct capture dependency, configures the narrowly scoped input
+helper, checks a real frame, and preserves the existing SSHDESK login. Then
+retry the ordinary SSH command from the client.
+
 ## Linux host details
 
 ### Manual installation
@@ -122,10 +133,12 @@ display stack:
 | GNOME Wayland | `gnome-screenshot` | `ydotool` + `ydotoold` |
 | KDE Plasma Wayland | `spectacle` | `ydotool` + `ydotoold` |
 
-Install those names with the distribution package manager. FFmpeg and
-NumPy/OpenCV are acceleration paths; SSHDESK falls back when they are absent.
-Wayland input requires `ydotoold` to have access to `/dev/uinput`; do not run the
-whole SSHDESK server as root.
+The one-line installer handles these dependencies automatically. For a manual
+installation, install the capture command with the distribution package
+manager and configure ydotool 1.0.4 or newer. FFmpeg and NumPy/OpenCV are
+acceleration paths; SSHDESK falls back when they are absent. Wayland input
+requires `ydotoold` to have access to `/dev/uinput`; do not run the whole
+SSHDESK server as root.
 
 From the repository on the server:
 

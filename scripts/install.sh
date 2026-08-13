@@ -6,6 +6,13 @@ BRANCH="main"
 TAILSCALE_INSTALL_URL="https://tailscale.com/install.sh"
 TAILSCALE_MAC_URL="https://tailscale.com/download/mac"
 HOMEBREW_INSTALL_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+YDOTOOL_VERSION="1.0.4"
+YDOTOOL_URL="https://github.com/ReimuNotMoe/ydotool/releases/download/v1.0.4/ydotool-release-ubuntu-latest"
+YDOTOOLD_URL="https://github.com/ReimuNotMoe/ydotool/releases/download/v1.0.4/ydotoold-release-ubuntu-latest"
+YDOTOOL_SHA256="daa83507a596d6839b7467540382dbdc6e4bf64ebfa4f7d6416e877d9a522c0c"
+YDOTOOLD_SHA256="3f14f96308935214c0fb154507360f7632e7deda1935dc2d538259fd9986ed36"
+YDOTOOL_SOURCE_URL="https://github.com/ReimuNotMoe/ydotool/archive/refs/tags/v1.0.4.tar.gz"
+YDOTOOL_SOURCE_SHA256="ba075a43aa6ead51940e892ecffa4d0b8b40c241e4e2bc4bd9bd26b61fde23bd"
 tailscale_choice="ask"
 requested_user="${SSHDESK_USER-}"
 temporary_directory=""
@@ -104,6 +111,18 @@ else
     as_root="sudo"
 fi
 
+run_as_desktop_user() {
+    if [ "$(id -un)" = "${requested_user}" ]; then
+        "$@"
+    elif command -v runuser >/dev/null 2>&1; then
+        ${as_root} runuser -u "${requested_user}" -- "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo -u "${requested_user}" -- "$@"
+    else
+        fail "could not run a desktop access check as ${requested_user}"
+    fi
+}
+
 install_prerequisites() {
     need_python=0
     need_sshd=0
@@ -138,6 +157,211 @@ install_prerequisites() {
     else
         fail "install Python 3 with venv and OpenSSH server, then rerun this command"
     fi
+}
+
+install_linux_capture_package() {
+    family="$1"
+    case "${family}" in
+        gnome) executable="gnome-screenshot" ;;
+        kde) executable="spectacle" ;;
+        wlroots) executable="grim" ;;
+        *) fail "unknown Wayland desktop family: ${family}" ;;
+    esac
+    command -v "${executable}" >/dev/null 2>&1 && return
+
+    say "Installing ${family} Wayland capture support..."
+    if command -v apt-get >/dev/null 2>&1; then
+        case "${family}" in
+            gnome) package="gnome-screenshot" ;;
+            kde) package="kde-spectacle" ;;
+            wlroots) package="grim" ;;
+        esac
+        ${as_root} apt-get update
+        ${as_root} apt-get install -y "${package}"
+    elif command -v dnf >/dev/null 2>&1; then
+        case "${family}" in
+            gnome) package="gnome-screenshot" ;;
+            kde) package="spectacle" ;;
+            wlroots) package="grim" ;;
+        esac
+        ${as_root} dnf install -y "${package}"
+    elif command -v yum >/dev/null 2>&1; then
+        case "${family}" in
+            gnome) package="gnome-screenshot" ;;
+            kde) package="spectacle" ;;
+            wlroots) package="grim" ;;
+        esac
+        ${as_root} yum install -y "${package}"
+    elif command -v pacman >/dev/null 2>&1; then
+        case "${family}" in
+            gnome) package="gnome-screenshot" ;;
+            kde) package="spectacle" ;;
+            wlroots) package="grim" ;;
+        esac
+        ${as_root} pacman -Sy --needed --noconfirm "${package}"
+    elif command -v zypper >/dev/null 2>&1; then
+        case "${family}" in
+            gnome) package="gnome-screenshot" ;;
+            kde) package="spectacle" ;;
+            wlroots) package="grim" ;;
+        esac
+        ${as_root} zypper --non-interactive install "${package}"
+    elif command -v apk >/dev/null 2>&1; then
+        case "${family}" in
+            gnome) package="gnome-screenshot" ;;
+            kde) package="spectacle" ;;
+            wlroots) package="grim" ;;
+        esac
+        ${as_root} apk add "${package}"
+    else
+        fail "install ${executable} for Wayland capture, then rerun this command"
+    fi
+    command -v "${executable}" >/dev/null 2>&1 || \
+        fail "${executable} is unavailable after package installation"
+}
+
+install_ydotool_binaries() {
+    helper_directory="/usr/local/libexec/sshdesk"
+    ydotool_cli="/usr/local/bin/ydotool"
+    ydotool_daemon="${helper_directory}/ydotoold"
+
+    if [ "$(uname -m)" = "x86_64" ] && ! command -v apk >/dev/null 2>&1; then
+        say "Installing the pinned ydotool ${YDOTOOL_VERSION} Wayland input helper..."
+        downloaded_cli="${temporary_directory}/ydotool"
+        downloaded_daemon="${temporary_directory}/ydotoold"
+        curl -fsSL "${YDOTOOL_URL}" -o "${downloaded_cli}"
+        curl -fsSL "${YDOTOOLD_URL}" -o "${downloaded_daemon}"
+        command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
+        printf '%s  %s\n' "${YDOTOOL_SHA256}" "${downloaded_cli}" | sha256sum -c -
+        printf '%s  %s\n' "${YDOTOOLD_SHA256}" "${downloaded_daemon}" | sha256sum -c -
+        chmod 0755 "${downloaded_cli}" "${downloaded_daemon}"
+        if "${downloaded_cli}" --help >/dev/null 2>&1 && \
+            "${downloaded_daemon}" --help 2>&1 | grep -q -- '--socket-own'; then
+            ${as_root} install -d -m 0755 "${helper_directory}"
+            ${as_root} install -m 0755 "${downloaded_cli}" "${ydotool_cli}"
+            ${as_root} install -m 0755 "${downloaded_daemon}" "${ydotool_daemon}"
+            return
+        fi
+        say "The release binary is incompatible with this system; building ydotool locally..."
+    fi
+
+    say "Installing the ydotool build prerequisites..."
+    if command -v apt-get >/dev/null 2>&1; then
+        ${as_root} apt-get update
+        ${as_root} apt-get install -y build-essential cmake
+    elif command -v dnf >/dev/null 2>&1; then
+        ${as_root} dnf install -y gcc make cmake
+    elif command -v yum >/dev/null 2>&1; then
+        ${as_root} yum install -y gcc make cmake
+    elif command -v pacman >/dev/null 2>&1; then
+        ${as_root} pacman -Sy --needed --noconfirm base-devel cmake
+    elif command -v zypper >/dev/null 2>&1; then
+        ${as_root} zypper --non-interactive install gcc make cmake
+    elif command -v apk >/dev/null 2>&1; then
+        ${as_root} apk add build-base cmake linux-headers
+    else
+        fail "install a C compiler, make, and CMake 3.4+, then rerun this command"
+    fi
+
+    source_archive="${temporary_directory}/ydotool-${YDOTOOL_VERSION}.tar.gz"
+    source_directory="${temporary_directory}/ydotool-source"
+    build_directory="${temporary_directory}/ydotool-build"
+    curl -fsSL "${YDOTOOL_SOURCE_URL}" -o "${source_archive}"
+    command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
+    printf '%s  %s\n' "${YDOTOOL_SOURCE_SHA256}" "${source_archive}" | sha256sum -c -
+    mkdir -p "${source_directory}" "${build_directory}"
+    tar -xzf "${source_archive}" -C "${source_directory}" --strip-components=1
+    (
+        cd "${build_directory}"
+        cmake -DCMAKE_BUILD_TYPE=Release "${source_directory}"
+        cmake --build . --target ydotool ydotoold
+    )
+    ${as_root} install -d -m 0755 "${helper_directory}"
+    ${as_root} install -m 0755 "${build_directory}/ydotool" "${ydotool_cli}"
+    ${as_root} install -m 0755 "${build_directory}/ydotoold" "${ydotool_daemon}"
+}
+
+configure_ydotool_service() {
+    command -v systemctl >/dev/null 2>&1 || \
+        fail "automatic Wayland input currently requires systemd"
+    if [ ! -c /dev/uinput ]; then
+        command -v modprobe >/dev/null 2>&1 || \
+            fail "/dev/uinput is missing and modprobe is unavailable"
+        ${as_root} modprobe uinput
+    fi
+    [ -c /dev/uinput ] || fail "the Linux uinput device is unavailable"
+    modules_file="${temporary_directory}/sshdesk-uinput.conf"
+    printf 'uinput\n' > "${modules_file}"
+    ${as_root} install -d -m 0755 /etc/modules-load.d
+    ${as_root} install -m 0644 \
+        "${modules_file}" /etc/modules-load.d/sshdesk-uinput.conf
+    desktop_uid="$(id -u "${requested_user}")"
+    desktop_gid="$(id -g "${requested_user}")"
+    YDOTOOL_SOCKET="/run/sshdesk-ydotool/socket"
+    export YDOTOOL_SOCKET
+    service_file="${temporary_directory}/sshdesk-ydotoold.service"
+    cat > "${service_file}" <<EOF
+[Unit]
+Description=SSHDESK Wayland input helper
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+ExecStart=${ydotool_daemon} --socket-path=${YDOTOOL_SOCKET} --socket-perm=0600 --socket-own=${desktop_uid}:${desktop_gid}
+Restart=on-failure
+RestartSec=1
+RuntimeDirectory=sshdesk-ydotool
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+DevicePolicy=closed
+DeviceAllow=/dev/uinput rw
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    ${as_root} install -m 0644 \
+        "${service_file}" /etc/systemd/system/sshdesk-ydotoold.service
+    ${as_root} systemctl daemon-reload
+    ${as_root} systemctl enable --now sshdesk-ydotoold.service
+
+    attempts=0
+    while [ ! -S "${YDOTOOL_SOCKET}" ] && [ "${attempts}" -lt 50 ]; do
+        attempts=$((attempts + 1))
+        sleep 0.1
+    done
+    [ -S "${YDOTOOL_SOCKET}" ] || \
+        fail "ydotoold did not create ${YDOTOOL_SOCKET}; check its systemd service"
+    if ! run_as_desktop_user env "YDOTOOL_SOCKET=${YDOTOOL_SOCKET}" \
+        "${ydotool_cli}" debug >/dev/null 2>&1; then
+        fail "${requested_user} cannot connect to the SSHDESK ydotoold socket"
+    fi
+}
+
+install_linux_desktop_dependencies() {
+    [ "${operating_system}" = "Linux" ] || return
+    if [ "${XDG_SESSION_TYPE-}" != "wayland" ] && [ -z "${WAYLAND_DISPLAY-}" ]; then
+        return
+    fi
+
+    desktop_name="$(printf '%s' "${XDG_CURRENT_DESKTOP-}" | tr '[:upper:]' '[:lower:]')"
+    case "${desktop_name}" in
+        *gnome*|*unity*|*cinnamon*|*budgie*) desktop_family="gnome" ;;
+        *kde*|*plasma*) desktop_family="kde" ;;
+        *) desktop_family="wlroots" ;;
+    esac
+    install_linux_capture_package "${desktop_family}"
+    install_ydotool_binaries
+    configure_ydotool_service
 }
 
 find_brew() {
@@ -333,6 +557,7 @@ if [ "${operating_system}" = "Darwin" ]; then
     install_macos_prerequisites
 else
     install_prerequisites
+    install_linux_desktop_dependencies
     sshd_binary="$(find_sshd)" || fail "OpenSSH server is unavailable after installation"
     command -v ssh-keygen >/dev/null 2>&1 && ${as_root} ssh-keygen -A
 fi
@@ -380,6 +605,18 @@ ${as_root} env \
     "YDOTOOL_SOCKET=${YDOTOOL_SOCKET-}" \
     "${project_directory}/scripts/install-server.sh" \
     "${requested_user}" "${display_value}" "${xauthority_value}"
+
+say "Verifying graphical capture and input access..."
+run_as_desktop_user env \
+    "DISPLAY=${display_value}" \
+    "XAUTHORITY=${xauthority_value}" \
+    "WAYLAND_DISPLAY=${WAYLAND_DISPLAY-}" \
+    "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR-}" \
+    "XDG_SESSION_TYPE=${XDG_SESSION_TYPE-}" \
+    "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP-}" \
+    "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS-}" \
+    "YDOTOOL_SOCKET=${YDOTOOL_SOCKET-}" \
+    /usr/local/bin/sshdesk-server --check
 
 sshd_main="/etc/ssh/sshd_config"
 sshd_directory="/etc/ssh/sshd_config.d"

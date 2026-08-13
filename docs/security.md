@@ -10,6 +10,12 @@ Run `sshdesk-server` as the graphical desktop user, never as root. X11 capture
 and XTest input require access to the target `DISPLAY` and its Xauthority cookie.
 Wayland capture needs the logged-in session's runtime/D-Bus environment, and
 ydotool input needs a narrowly configured `ydotoold` with `/dev/uinput` access.
+On systemd Linux hosts, the one-line installer isolates that helper in
+`sshdesk-ydotoold.service`, exposes a mode-0600 Unix socket owned by the desktop
+user, and restricts the service device policy to `/dev/uinput`. The downloaded
+x86-64 helper is pinned and SHA-256 verified; incompatible systems build the
+same pinned source release locally. The installer also loads the `uinput`
+kernel module at boot when it is modular.
 Keep session credentials private. If a different dedicated SSH account is used,
 granting it access to the graphical session is effectively granting console control.
 The MIT-SHM capture segment is created mode 0600 and immediately marked for
