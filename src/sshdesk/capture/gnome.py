@@ -384,6 +384,19 @@ class GnomeScreenCastCapture(ScreenCapture):
             if self._signal_subscription is not None:
                 self._bus.signal_unsubscribe(self._signal_subscription)
                 self._signal_subscription = None
+            screen_path = self._screen_session_path
+            self._screen_session_path = None
+            if screen_path is not None:
+                try:
+                    self._call(
+                        self.SCREENCAST_NAME,
+                        screen_path,
+                        self.SCREENCAST_SESSION_INTERFACE,
+                        "Stop",
+                        timeout_ms=1000,
+                    )
+                except RuntimeError:
+                    pass
             remote_path = self._remote_session_path
             self._remote_session_path = None
             if remote_path is not None:
@@ -397,7 +410,6 @@ class GnomeScreenCastCapture(ScreenCapture):
                     )
                 except RuntimeError:
                     pass
-            self._screen_session_path = None
             self._stream_path = None
             self._pipewire_node = None
             self._cursor_position = None

@@ -5,6 +5,7 @@
 - keep the GNOME cursor out of the PipeWire framebuffer so motion does not encode frames
 - send tiny cursor placement updates immediately without waiting for screen capture
 - coalesce bursts of terminal mouse-motion reports before desktop input injection
+- explicitly close GNOME ScreenCast sessions during disconnect cleanup
 
 ## 0.4.3
 

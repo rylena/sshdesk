@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -40,6 +41,33 @@ class GnomeCaptureTests(unittest.TestCase):
         )
         capture._call = lambda *_args, **_kwargs: state
         self.assertEqual(capture._desktop_area(), (0, 0, 3200, 1080))
+
+    def test_close_stops_screen_and_remote_desktop_sessions(self) -> None:
+        capture = object.__new__(GnomeScreenCastCapture)
+        capture._lock = threading.RLock()
+        capture._closed = False
+        capture._pipeline = None
+        capture._sink = None
+        capture._signal_subscription = None
+        capture._screen_session_path = "/screen/session"
+        capture._remote_session_path = "/remote/session"
+        capture._stream_path = "/screen/stream"
+        capture._pipewire_node = 42
+        capture._cursor_position = (10, 20)
+        calls: list[tuple[str, str, str]] = []
+        capture._call = lambda name, path, interface, method, **_kwargs: calls.append(
+            (name, path, method)
+        )
+
+        capture.close()
+
+        self.assertEqual(
+            calls,
+            [
+                (capture.SCREENCAST_NAME, "/screen/session", "Stop"),
+                (capture.REMOTE_NAME, "/remote/session", "Stop"),
+            ],
+        )
 
 
 if __name__ == "__main__":
