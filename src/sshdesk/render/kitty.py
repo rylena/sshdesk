@@ -124,7 +124,15 @@ class KittyRenderer:
         content_rows = height - margin
         usable_width = width * cell_width
         usable_height = content_rows * cell_height
-        scale = min(usable_width / desktop_width, usable_height / desktop_height)
+        # Sending more pixels than the remote desktop contains adds no detail,
+        # but it makes capture scaling, diffing, PNG encoding, SSH transport,
+        # and terminal decoding all more expensive. Let the terminal center a
+        # native-size desktop instead of upscaling it on the server.
+        scale = min(
+            1.0,
+            usable_width / desktop_width,
+            usable_height / desktop_height,
+        )
         ideal_width = max(cell_width, desktop_width * scale)
         ideal_height = max(cell_height, desktop_height * scale)
         cell_columns = max(1, min(width, int(ideal_width // cell_width)))

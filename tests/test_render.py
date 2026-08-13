@@ -171,7 +171,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(renderer.diff(first, first).kind, UpdateKind.UNCHANGED)
 
         image = source.capture().image.copy()
-        image.paste((255, 0, 255), (100, 50, 140, 90))
+        image.paste((255, 0, 255), (110, 60, 120, 70))
         second = renderer.render(Frame(image, 2), 80, 24)
         update = renderer.diff(first, second)
         self.assertEqual(update.kind, UpdateKind.DELTA)
@@ -194,6 +194,16 @@ class RenderTests(unittest.TestCase):
             (1920, 1080),
         )
         self.assertEqual(rendered.image.getpixel((0, 0)), (12, 34, 56))
+
+    def test_kitty_renderer_never_upscales_the_remote_desktop(self) -> None:
+        renderer = KittyRenderer(self.graphics_probe())
+        rendered = renderer.render(
+            SyntheticCapture(320, 180, animate=False).capture(),
+            200,
+            80,
+        )
+        self.assertLessEqual(rendered.pixel_viewport.width, 320)
+        self.assertLessEqual(rendered.pixel_viewport.height, 180)
 
     def test_kitty_writer_emits_chunked_paletted_png(self) -> None:
         renderer = KittyRenderer(self.graphics_probe())

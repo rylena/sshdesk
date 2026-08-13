@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3
+
+- stop upscaling smaller remote desktops to large terminal windows
+- avoid wasted capture scaling, rendering, diffing, encoding, and terminal decode work
+
 ## 0.4.2
 
 - replace large Kitty tile bursts with one atomic, paletted PNG canvas update
