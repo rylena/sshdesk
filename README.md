@@ -1,12 +1,13 @@
 # SSHDESK
 
 ```text
-  ____  ____  _   _ ____  _____ ____  _  __
- / ___|/ ___|| | | |  _ \| ____/ ___|| |/ /
- \___ \\___ \| |_| | | | |  _| \___ \| ' /
-  ___) |___) |  _  | |_| | |___ ___) | . \
- |____/|____/|_| |_|____/|_____|____/|_|\_\
-                   DESKTOP OVER SSH
+       _____ _____ __  ______  ____________ __ __
+      / ___// ___// / / / __ \/ ____/ ___// //_/
+      \__ \ \__ \/ /_/ / / / / __/  \__ \/ ,<
+     ___/ /___/ / __  / /_/ / /___ ___/ / /| |
+    /____//____/_/ /_/_____/_____//____/_/ |_|
+
+        YOUR DESKTOP  //  ONE SSH SESSION  //  ZERO EXTRA PORTS
 ```
 
 [![Tests](https://github.com/rylena/sshdesk/actions/workflows/test.yml/badge.svg)](https://github.com/rylena/sshdesk/actions/workflows/test.yml)
