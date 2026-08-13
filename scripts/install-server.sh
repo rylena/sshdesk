@@ -56,9 +56,9 @@ if [ ! -x "${venv}/bin/python" ]; then
         exit 1
     }
 fi
-if ! "${venv}/bin/python" -m pip install --no-build-isolation --upgrade "${project_dir}[fast]"; then
+if ! "${venv}/bin/python" -m pip install --upgrade "${project_dir}[fast]"; then
     echo "note: optional native acceleration failed; installing the portable build" >&2
-    "${venv}/bin/python" -m pip install --no-build-isolation --upgrade "${project_dir}"
+    "${venv}/bin/python" -m pip install --upgrade "${project_dir}"
 fi
 
 install -m 0755 "${script_dir}/sshdesk-forced-command" /usr/local/bin/sshdesk-forced-command

@@ -43,5 +43,16 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertLess(source.index("Restart-Service sshd"), source.index("Read-Host"))
 
 
+class PackageCompatibilityTests(unittest.TestCase):
+    def test_license_uses_pep621_table_for_older_setuptools(self) -> None:
+        source = (ROOT / "pyproject.toml").read_text()
+        self.assertIn('license = { text = "MIT" }', source)
+        self.assertNotIn("license-files", source)
+
+    def test_linux_installer_allows_isolated_build_dependencies(self) -> None:
+        source = (ROOT / "scripts" / "install-server.sh").read_text()
+        self.assertNotIn("--no-build-isolation", source)
+
+
 if __name__ == "__main__":
     unittest.main()

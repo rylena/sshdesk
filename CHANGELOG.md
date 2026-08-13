@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- make package license metadata compatible with older distribution `setuptools`
+- build Linux installs in an isolated environment instead of reusing stale system build tools
+
 ## 0.3.2
 
 - make the one-line bootstrap detect Linux and macOS hosts

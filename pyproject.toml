@@ -4,12 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sshdesk"
-version = "0.3.2"
+version = "0.3.3"
 description = "A full interactive remote desktop delivered entirely through SSH"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
-license-files = ["LICENSE"]
+license = { text = "MIT" }
 dependencies = [
   "Pillow>=9.0",
   "python-xlib>=0.33; platform_system == 'Linux'",
