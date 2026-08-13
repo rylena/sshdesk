@@ -91,6 +91,8 @@ class DirectSession:
         self.current: RenderedFrame | KittyRenderedFrame | None = None
         self.pixel_mouse = False
         self._current_lock = threading.Lock()
+        self._cursor_lock = threading.Lock()
+        self._pending_cursor: tuple[int, int] | None = None
         self._controls: queue.SimpleQueue[ControlKind | BaseException] = queue.SimpleQueue()
         self._last_activity = time.monotonic()
         self._input_thread: threading.Thread | None = None
@@ -198,7 +200,33 @@ class DirectSession:
             self.input.scroll(event.amount, x, y)
         else:
             return False
+        # Cursor placement is independent of the captured framebuffer. Keep only
+        # the newest coordinate so rapid terminal motion cannot build a queue.
+        with self._cursor_lock:
+            self._pending_cursor = x, y
         return True
+
+    @staticmethod
+    def _coalesce_mouse_moves(events: list[object]) -> list[object]:
+        """Keep the newest motion in each uninterrupted run of mouse moves."""
+
+        compacted: list[object] = []
+        for event in events:
+            if (
+                isinstance(event, MouseMoveEvent)
+                and compacted
+                and isinstance(compacted[-1], MouseMoveEvent)
+            ):
+                compacted[-1] = event
+            else:
+                compacted.append(event)
+        return compacted
+
+    def _take_pending_cursor(self) -> tuple[int, int] | None:
+        with self._cursor_lock:
+            cursor = self._pending_cursor
+            self._pending_cursor = None
+        return cursor
 
     def _input_loop(self, input_fd: int) -> None:
         """Read and inject input independently so slow frame writes cannot starve it."""
@@ -235,7 +263,7 @@ class DirectSession:
                         events = self.parser.feed(data)
                     else:
                         events = self.parser.flush()
-                for event in events:
+                for event in self._coalesce_mouse_moves(events):
                     if self._handle_event(event):
                         self._last_activity = time.monotonic()
                         self._wake_event.set()
@@ -336,6 +364,18 @@ class DirectSession:
                                 draw_header=True,
                             )
 
+                    # Do not wait for a desktop frame before moving the cursor.
+                    # The terminal-side cursor update is tiny and mouse motion
+                    # remains responsive even on an otherwise static desktop.
+                    pending_cursor = self._take_pending_cursor()
+                    if pending_cursor is not None and pending_cursor != last_cursor:
+                        self._draw_extras(
+                            terminal.output_fd,
+                            pending_cursor,
+                            draw_stats=False,
+                        )
+                        last_cursor = pending_cursor
+
                     new_dimensions = TerminalState.size(terminal.output_fd)
                     if new_dimensions != dimensions:
                         dimensions = new_dimensions
@@ -400,7 +440,9 @@ class DirectSession:
                         self._frame_pump.captured_frames,
                         self._frame_pump.dropped_frames,
                     )
-                    cursor = self.capture.cursor_position()
+                    cursor = self._take_pending_cursor()
+                    if cursor is None:
+                        cursor = self.capture.cursor_position()
                     cursor_changed = cursor != last_cursor
                     draw_stats = self.show_stats and now - last_stats_draw >= 1.0
 

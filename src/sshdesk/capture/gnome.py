@@ -180,8 +180,10 @@ class GnomeScreenCastCapture(ScreenCapture):
         )[0]
         self._screen_session_path = str(screen_path)
         stream_properties = {
-            # Keep the cursor separate so mouse movement never forces a frame.
-            "cursor-mode": self._glib.Variant("u", 1),
+            # Mutter cursor mode 0 hides it from the video stream. SSHDESK sends
+            # its own tiny cursor placement updates, so pointer movement must not
+            # dirty and re-encode the desktop framebuffer.
+            "cursor-mode": self._glib.Variant("u", 0),
         }
         x, y, width, height = area
         stream_path = self._call(

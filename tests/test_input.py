@@ -18,6 +18,7 @@ from sshdesk.input.mutter import MutterInput
 from sshdesk.input.terminal import TerminalEventParser, translate_coordinates
 from sshdesk.render.base import Viewport
 from sshdesk.render.kitty import PixelViewport, translate_pixel_coordinates
+from sshdesk.session.direct import DirectSession
 
 
 class InputTests(unittest.TestCase):
@@ -57,6 +58,20 @@ class InputTests(unittest.TestCase):
         self.assertEqual(events[2], MouseMoveEvent(10, 5))
         self.assertEqual(events[3], MouseScrollEvent(1, 10, 5))
         self.assertEqual(events[4], MouseScrollEvent(-1, 10, 5))
+
+    def test_consecutive_mouse_moves_are_coalesced_without_losing_clicks(self) -> None:
+        click = MouseButtonEvent(1, True, 30, 15)
+        events = [
+            MouseMoveEvent(10, 5),
+            MouseMoveEvent(20, 10),
+            click,
+            MouseMoveEvent(31, 16),
+            MouseMoveEvent(32, 17),
+        ]
+        self.assertEqual(
+            DirectSession._coalesce_mouse_moves(events),
+            [MouseMoveEvent(20, 10), click, MouseMoveEvent(32, 17)],
+        )
 
     def test_legacy_x10_mouse_fallback(self) -> None:
         parser = TerminalEventParser()
