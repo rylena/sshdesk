@@ -52,26 +52,43 @@ mobile clients, and embedded SSH terminals remain usable.
 - terminal restoration and held-input release after disconnects or crashes
 - X11, common Wayland desktop, macOS, and Windows backend abstractions
 
-## Linux installation
+## One-line installation
 
-Install and configure SSHDESK with one command:
+The bootstrap downloads the same SSHDESK release and selects the native
+installer automatically. On Linux or macOS, run this in a terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rylena/sshdesk/main/scripts/install.sh | sh
 ```
 
-The installer detects the graphical user, installs missing Python/OpenSSH
-prerequisites, installs SSHDESK, validates the forced-command configuration,
-and starts OpenSSH. At the very end it asks whether to install and start
-Tailscale. Answering yes runs Tailscale's official Linux installer, starts
-`tailscaled`, and runs `tailscale up` to display its login link. This carries
-normal OpenSSH over the private tailnet; it does not replace OpenSSH or enable a
+On Windows, run this in PowerShell. It requests Administrator permission when
+needed:
+
+```powershell
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/rylena/sshdesk/main/scripts/install.ps1')))
+```
+
+Both one-line entry points detect the OS, install missing Python/OpenSSH
+prerequisites, install SSHDESK, validate the forced-command configuration, and
+start the platform's OpenSSH service. They support common Linux distributions,
+macOS, and Windows 10/11. The installer asks whether to install and start
+Tailscale only after SSHDESK and OpenSSH setup succeeds. Tailscale carries
+normal OpenSSH over the private tailnet; it does not replace OpenSSH or add a
 second SSH authentication mode.
 
+> [!IMPORTANT]
+> Cross-platform installation does not remove OS security boundaries. macOS
+> still asks for Screen Recording and Accessibility access. Windows OpenSSH
+> normally runs in Session 0, so Windows forced-command desktop capture remains
+> experimental even though the one-line installer itself is supported. Any OS
+> can be the SSH client; Linux remains the recommended SSHDESK host.
+
 > [!NOTE]
-> A one-line installer executes downloaded code with `sudo` during setup. Review
-> [scripts/install.sh](scripts/install.sh) first if that is not appropriate for
-> the machine. Use `--user USER` when automatic desktop-user detection is wrong.
+> A one-line installer executes downloaded code with administrator permission
+> during setup. Review [scripts/install.sh](scripts/install.sh) or
+> [scripts/install.ps1](scripts/install.ps1) first if that is not appropriate
+> for the machine. On Linux/macOS, use `--user USER` when automatic user
+> detection is wrong.
 
 For unattended installs, download the script and use `--tailscale` or
 `--no-tailscale`:
@@ -81,6 +98,15 @@ curl -fsSLo /tmp/sshdesk-install.sh \
   https://raw.githubusercontent.com/rylena/sshdesk/main/scripts/install.sh
 sh /tmp/sshdesk-install.sh --user alice --no-tailscale
 ```
+
+Windows PowerShell accepts `-Tailscale` or `-NoTailscale` on the downloaded
+script block:
+
+```powershell
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/rylena/sshdesk/main/scripts/install.ps1'))) -NoTailscale
+```
+
+## Linux host details
 
 ### Manual installation
 
@@ -229,11 +255,12 @@ SSHDESK_MAX_FPS=auto
 fallback. `SSHDESK_X11_CAPTURE=auto` tries continuously drained FFmpeg/XCB,
 then MIT-SHM, then Pillow/XCB. `SSHDESK_MAX_FPS` accepts 1–120.
 
-## macOS and Windows
+## macOS and Windows host details
 
 Linux is the primary, fully integrated OpenSSH host. Native Pillow capture plus
 Quartz input on macOS and SendInput on Windows are available for development and
-manually launched sessions:
+manually launched sessions. The repository-local commands below are useful for
+development; most users should use the one-line installers above:
 
 ```bash
 ./scripts/install-macos.sh

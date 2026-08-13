@@ -4,9 +4,12 @@ set -eu
 REPOSITORY="rylena/sshdesk"
 BRANCH="main"
 TAILSCALE_INSTALL_URL="https://tailscale.com/install.sh"
+TAILSCALE_MAC_URL="https://tailscale.com/download/mac"
+HOMEBREW_INSTALL_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
 tailscale_choice="ask"
 requested_user="${SSHDESK_USER-}"
 temporary_directory=""
+operating_system="$(uname -s)"
 
 say() {
     printf '%s\n' "$*"
@@ -21,8 +24,8 @@ usage() {
     cat <<'EOF'
 Usage: install.sh [--user USER] [--tailscale | --no-tailscale]
 
-Installs SSHDESK for the active Linux desktop user, configures OpenSSH, and
-optionally installs and starts Tailscale at the end.
+Installs SSHDESK for the active Linux or macOS desktop user, configures
+OpenSSH, and optionally installs and starts Tailscale at the end.
 EOF
 }
 
@@ -59,19 +62,26 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-[ "$(uname -s)" = "Linux" ] || fail "the one-line server installer supports Linux"
+case "${operating_system}" in
+    Linux|Darwin) ;;
+    *) fail "unsupported operating system: ${operating_system}; use install.ps1 on Windows" ;;
+esac
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 command -v sudo >/dev/null 2>&1 || [ "$(id -u)" -eq 0 ] || fail "sudo is required"
 
-if [ -z "${requested_user}" ]; then
-    requested_user="${SUDO_USER-}"
-fi
-if [ -z "${requested_user}" ] || [ "${requested_user}" = "root" ]; then
-    requested_user="${USER-}"
-fi
-if [ -z "${requested_user}" ] || [ "${requested_user}" = "root" ]; then
-    requested_user="$(logname 2>/dev/null || true)"
+if [ "${operating_system}" = "Darwin" ]; then
+    [ -n "${requested_user}" ] || requested_user="$(id -un)"
+else
+    if [ -z "${requested_user}" ]; then
+        requested_user="${SUDO_USER-}"
+    fi
+    if [ -z "${requested_user}" ] || [ "${requested_user}" = "root" ]; then
+        requested_user="${USER-}"
+    fi
+    if [ -z "${requested_user}" ] || [ "${requested_user}" = "root" ]; then
+        requested_user="$(logname 2>/dev/null || true)"
+    fi
 fi
 if [ -z "${requested_user}" ] || [ "${requested_user}" = "root" ]; then
     fail "could not detect the desktop user; rerun with --user USER"
@@ -79,7 +89,14 @@ fi
 case "${requested_user}" in
     -*|*[!A-Za-z0-9_.-]*|'') fail "invalid desktop user: ${requested_user}" ;;
 esac
-getent passwd "${requested_user}" >/dev/null 2>&1 || fail "user does not exist: ${requested_user}"
+if [ "${operating_system}" = "Linux" ]; then
+    getent passwd "${requested_user}" >/dev/null 2>&1 || \
+        fail "user does not exist: ${requested_user}"
+else
+    id "${requested_user}" >/dev/null 2>&1 || fail "user does not exist: ${requested_user}"
+    [ "${requested_user}" = "$(id -un)" ] || \
+        fail "run the macOS installer while logged in as ${requested_user}"
+fi
 
 if [ "$(id -u)" -eq 0 ]; then
     as_root=""
@@ -121,6 +138,108 @@ install_prerequisites() {
     else
         fail "install Python 3 with venv and OpenSSH server, then rerun this command"
     fi
+}
+
+find_brew() {
+    if command -v brew >/dev/null 2>&1; then
+        command -v brew
+    elif [ -x /opt/homebrew/bin/brew ]; then
+        printf '%s\n' /opt/homebrew/bin/brew
+    elif [ -x /usr/local/bin/brew ]; then
+        printf '%s\n' /usr/local/bin/brew
+    else
+        return 1
+    fi
+}
+
+ensure_homebrew() {
+    if brew_binary="$(find_brew 2>/dev/null)"; then
+        printf '%s\n' "${brew_binary}"
+        return
+    fi
+    say "Installing Homebrew to provide missing macOS prerequisites..." >&2
+    homebrew_script="${temporary_directory}/homebrew-install.sh"
+    curl -fsSL "${HOMEBREW_INSTALL_URL}" -o "${homebrew_script}"
+    NONINTERACTIVE=1 /bin/bash "${homebrew_script}"
+    find_brew || fail "Homebrew installed but its executable could not be found"
+}
+
+install_macos_prerequisites() {
+    if command -v python3 >/dev/null 2>&1 && \
+        python3 -m venv "${temporary_directory}/venv-check" >/dev/null 2>&1; then
+        return
+    fi
+    find "${temporary_directory}/venv-check" -depth -mindepth 1 -delete 2>/dev/null || true
+    rmdir "${temporary_directory}/venv-check" 2>/dev/null || true
+    brew_binary="$(ensure_homebrew)"
+    "${brew_binary}" install python
+    brew_prefix="$("${brew_binary}" --prefix)"
+    PATH="${brew_prefix}/bin:${PATH}"
+    export PATH
+    command -v python3 >/dev/null 2>&1 || fail "Python 3 is unavailable after installation"
+}
+
+download_project() {
+    if [ -n "${SSHDESK_SOURCE_DIR-}" ]; then
+        project_directory="${SSHDESK_SOURCE_DIR}"
+        [ -f "${project_directory}/pyproject.toml" ] || fail "invalid SSHDESK_SOURCE_DIR"
+        return
+    fi
+    project_directory="${temporary_directory}/sshdesk"
+    mkdir -p "${project_directory}"
+    archive="${temporary_directory}/sshdesk.tar.gz"
+    curl -fsSL \
+        "https://github.com/${REPOSITORY}/archive/refs/heads/${BRANCH}.tar.gz" \
+        -o "${archive}"
+    tar -xzf "${archive}" -C "${project_directory}" --strip-components=1
+}
+
+configure_macos_openssh() {
+    desktop_home="$(dscl . -read "/Users/${requested_user}" NFSHomeDirectory | \
+        awk '{print $2}')"
+    [ -n "${desktop_home}" ] || fail "could not find the macOS home directory"
+    forced_command="${desktop_home}/.local/bin/sshdesk-forced-command"
+    [ -x "${forced_command}" ] || fail "portable forced command was not installed"
+
+    sshd_main="/etc/ssh/sshd_config"
+    sshd_directory="/etc/ssh/sshd_config.d"
+    sshd_snippet="${sshd_directory}/90-sshdesk-${requested_user}.conf"
+    added_include=0
+    ${as_root} install -d -m 0755 "${sshd_directory}"
+    if ! ${as_root} grep -Eiq \
+        '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*' \
+        "${sshd_main}"; then
+        combined_config="${temporary_directory}/sshd_config-macos"
+        printf 'Include /etc/ssh/sshd_config.d/*\n' > "${combined_config}"
+        ${as_root} cat "${sshd_main}" >> "${combined_config}"
+        ${as_root} cp -p "${sshd_main}" "${sshd_main}.before-sshdesk"
+        ${as_root} install -m 0644 "${combined_config}" "${sshd_main}"
+        added_include=1
+    fi
+
+    snippet="${temporary_directory}/90-sshdesk-macos.conf"
+    "${project_directory}/scripts/configure-sshd.sh" \
+        "${requested_user}" "${forced_command}" > "${snippet}"
+    had_previous=0
+    if ${as_root} test -f "${sshd_snippet}"; then
+        had_previous=1
+        ${as_root} cp -p "${sshd_snippet}" "${temporary_directory}/previous-macos-snippet"
+    fi
+    ${as_root} install -m 0644 "${snippet}" "${sshd_snippet}"
+    if ! ${as_root} /usr/sbin/sshd -t; then
+        if [ "${had_previous}" -eq 1 ]; then
+            ${as_root} install -m 0644 \
+                "${temporary_directory}/previous-macos-snippet" "${sshd_snippet}"
+        else
+            ${as_root} unlink "${sshd_snippet}"
+        fi
+        if [ "${added_include}" -eq 1 ]; then
+            ${as_root} cp -p "${sshd_main}.before-sshdesk" "${sshd_main}"
+        fi
+        fail "OpenSSH rejected the macOS configuration; changes were rolled back"
+    fi
+    ${as_root} /usr/sbin/systemsetup -setremotelogin on >/dev/null || \
+        fail "macOS could not enable Remote Login; grant Terminal Full Disk Access and rerun"
 }
 
 find_sshd() {
@@ -174,6 +293,18 @@ prompt_tailscale() {
 
 install_tailscale() {
     [ "${tailscale_choice}" = "yes" ] || return 0
+    if [ "${operating_system}" = "Darwin" ]; then
+        if [ ! -d /Applications/Tailscale.app ]; then
+            say "Installing the Tailscale macOS app..."
+            brew_binary="$(ensure_homebrew)"
+            "${brew_binary}" install --cask tailscale
+        else
+            say "Tailscale is already installed."
+        fi
+        say "Opening Tailscale to finish its VPN permission and login prompts..."
+        open -a Tailscale || open "${TAILSCALE_MAC_URL}"
+        return
+    fi
     if ! command -v tailscale >/dev/null 2>&1; then
         say "Installing Tailscale from the official installer..."
         tailscale_script="${temporary_directory}/tailscale-install.sh"
@@ -198,21 +329,27 @@ install_tailscale() {
 }
 
 temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/sshdesk-install.XXXXXX")"
-install_prerequisites
-sshd_binary="$(find_sshd)" || fail "OpenSSH server is unavailable after installation"
-command -v ssh-keygen >/dev/null 2>&1 && ${as_root} ssh-keygen -A
-
-if [ -n "${SSHDESK_SOURCE_DIR-}" ]; then
-    project_directory="${SSHDESK_SOURCE_DIR}"
-    [ -f "${project_directory}/pyproject.toml" ] || fail "invalid SSHDESK_SOURCE_DIR"
+if [ "${operating_system}" = "Darwin" ]; then
+    install_macos_prerequisites
 else
-    project_directory="${temporary_directory}/sshdesk"
-    mkdir -p "${project_directory}"
-    archive="${temporary_directory}/sshdesk.tar.gz"
-    curl -fsSL \
-        "https://github.com/${REPOSITORY}/archive/refs/heads/${BRANCH}.tar.gz" \
-        -o "${archive}"
-    tar -xzf "${archive}" -C "${project_directory}" --strip-components=1
+    install_prerequisites
+    sshd_binary="$(find_sshd)" || fail "OpenSSH server is unavailable after installation"
+    command -v ssh-keygen >/dev/null 2>&1 && ${as_root} ssh-keygen -A
+fi
+download_project
+
+if [ "${operating_system}" = "Darwin" ]; then
+    say "Installing SSHDESK for ${requested_user}..."
+    SSHDESK_BOOTSTRAP=1 "${project_directory}/scripts/install-macos.sh"
+    configure_macos_openssh
+    say "SSHDESK is installed and macOS Remote Login is running."
+    say "Connect with: ssh ${requested_user}@<server-address>"
+    say "Grant Screen Recording and Accessibility permission to the installed Python"
+    say "process in System Settings > Privacy & Security before connecting."
+    prompt_tailscale
+    install_tailscale
+    say "Installation complete."
+    exit 0
 fi
 
 desktop_home="$(getent passwd "${requested_user}" | cut -d: -f6)"

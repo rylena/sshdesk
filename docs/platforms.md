@@ -4,6 +4,10 @@ The SSH client side is terminal data, so Linux, macOS, Windows OpenSSH, PuTTY,
 mobile SSH apps, and other interactive clients can display SSHDESK. Sharpness is
 determined by the terminal emulator, not the operating system.
 
+The one-line bootstrap supports Linux, macOS, and Windows. That means the
+application, native backend, and OpenSSH configuration can be installed on each
+OS; the host limitations below still apply after installation.
+
 ## Linux host
 
 Linux is the primary supported host platform.

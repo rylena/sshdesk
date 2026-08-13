@@ -50,6 +50,19 @@ def server_main() -> int:
     return server_entrypoint()
 
 
+def forced_command_main() -> int:
+    """Dispatch the portable OpenSSH forced command without evaluating shell input."""
+    original_command = os.environ.get("SSH_ORIGINAL_COMMAND", "")
+    if original_command:
+        from sshdesk.agent import agent_ssh_entrypoint
+
+        return agent_ssh_entrypoint([original_command])
+    if not os.isatty(sys.stdin.fileno()) or not os.isatty(sys.stdout.fileno()):
+        print("SSHDESK requires an interactive SSH terminal (PTY).", file=sys.stderr)
+        return 1
+    return server_main()
+
+
 def bench_main() -> int:
     from sshdesk.bench import bench_entrypoint
 

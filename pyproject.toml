@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sshdesk"
-version = "0.3.1"
+version = "0.3.2"
 description = "A full interactive remote desktop delivered entirely through SSH"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ sshdesk-server = "sshdesk.cli:server_main"
 sshdesk-bench = "sshdesk.cli:bench_main"
 sshdesk-agent = "sshdesk.agent:agent_entrypoint"
 sshdesk-agent-ssh = "sshdesk.agent:agent_ssh_entrypoint"
+sshdesk-forced-command = "sshdesk.cli:forced_command_main"
 sshdesk-split = "sshdesk.client:split_entrypoint"
 sshdesk-remote = "sshdesk.client:remote_entrypoint"
 

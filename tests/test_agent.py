@@ -10,6 +10,7 @@ from sshdesk.agent import (
     agent_ssh_entrypoint,
 )
 from sshdesk.capture.synthetic import SyntheticCapture
+from sshdesk.cli import forced_command_main
 from sshdesk.client import _remote_request, _split_arguments
 from sshdesk.input.base import InputBackend
 from sshdesk.input.events import KeyCode, KeyEvent, Modifiers
@@ -71,6 +72,10 @@ class AgentTests(unittest.TestCase):
             agent_ssh_entrypoint(["sshdesk-agent screenshot --output /tmp/capture.png"]),
             2,
         )
+
+    def test_portable_forced_command_routes_only_agent_grammar(self) -> None:
+        with patch.dict("os.environ", {"SSH_ORIGINAL_COMMAND": "id"}, clear=True):
+            self.assertEqual(forced_command_main(), 126)
 
     def test_actions_are_bounded(self) -> None:
         controller, _backend = self.controller()

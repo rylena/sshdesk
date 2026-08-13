@@ -58,3 +58,17 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Check formatting and lint
         run: ruff check src tests
+      - name: Validate PowerShell installers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $allErrors = @()
+          foreach ($installer in @('scripts/install.ps1', 'scripts/install-windows.ps1')) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $installer), [ref]$tokens, [ref]$parseErrors
+            ) | Out-Null
+            $allErrors += $parseErrors
+          }
+          if ($allErrors.Count) { $allErrors | Out-String | Write-Error }

@@ -15,6 +15,7 @@ mkdir -p "${install_root}" "${bin_dir}"
 for command in sshdesk-server sshdesk-agent sshdesk-agent-ssh sshdesk-remote sshdesk-split; do
     ln -sfn "${venv}/bin/${command}" "${bin_dir}/${command}"
 done
+ln -sfn "${venv}/bin/sshdesk-forced-command" "${bin_dir}/sshdesk-forced-command"
 
 echo "Installed SSHDESK in ${install_root}."
 echo "Add ${bin_dir} to PATH, then grant Screen Recording and Accessibility"
