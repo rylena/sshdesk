@@ -72,10 +72,11 @@ needed:
 Both one-line entry points detect the OS, install missing Python/OpenSSH
 prerequisites, install SSHDESK, validate graphical access and the forced-command
 configuration, and start the platform's OpenSSH service. On Wayland, the Linux
-installer detects GNOME, KDE Plasma, or wlroots, installs its capture command,
-and provisions a checksum-verified `ydotoold` input helper. They support common
-Linux distributions, macOS, and Windows 10/11. The installer asks whether to
-install and start Tailscale only after SSHDESK and OpenSSH setup succeeds.
+installer detects GNOME, KDE Plasma, or wlroots. GNOME uses one persistent
+Mutter/PipeWire stream with compositor-native input; KDE and wlroots install a
+capture command and checksum-verified `ydotoold` helper. They support common Linux
+distributions, macOS, and Windows 10/11. The installer asks whether to install
+and start Tailscale only after SSHDESK and OpenSSH setup succeeds.
 Tailscale carries normal OpenSSH over the private tailnet; it does not replace
 OpenSSH or add a second SSH authentication mode.
 
@@ -111,16 +112,12 @@ script block:
 
 ### Repairing a Wayland installation
 
-If an older installation closes with `Wayland capture needs grim,
-gnome-screenshot, or spectacle`, log into that computer's graphical desktop,
-open its local terminal, and rerun the Linux/macOS one-line command above. It
-installs the correct capture dependency, configures the narrowly scoped input
-helper, checks a real frame, and preserves the existing SSHDESK login. Then
-retry the ordinary SSH command from the client. GNOME 49 and 50 also require
-the GNOME-reviewed [Allow gnome-screenshot extension](https://extensions.gnome.org/extension/9127/allow-gnome-screenshot/),
-which the installer downloads, verifies, and enables automatically. If GNOME
-has not loaded a newly installed extension yet, log out of the graphical
-desktop once, log back in, and rerun the installer.
+If an older installation closes with a Wayland capture error or behaves like a
+slow screenshot slideshow, log into that computer's graphical desktop, open
+its local terminal, and rerun the one-line command above. It upgrades GNOME to
+the persistent PipeWire backend, installs the correct compositor dependencies,
+checks a real frame, and preserves the existing SSHDESK login. Then retry the
+ordinary SSH command from the client.
 
 ## Linux host details
 
@@ -134,15 +131,15 @@ display stack:
 |---|---|---|
 | X11, any desktop | FFmpeg/XCB, MIT-SHM, or Pillow/XCB | XTest |
 | wlroots (Sway, Hyprland, etc.) | `grim` | `ydotool` + `ydotoold` |
-| GNOME Wayland | `gnome-screenshot` | `ydotool` + `ydotoold` |
+| GNOME Wayland | persistent Mutter + PipeWire/GStreamer | Mutter RemoteDesktop API |
 | KDE Plasma Wayland | `spectacle` | `ydotool` + `ydotoold` |
 
 The one-line installer handles these dependencies automatically. For a manual
-installation, install the capture command with the distribution package
-manager and configure ydotool 1.0.4 or newer. FFmpeg and NumPy/OpenCV are
-acceleration paths; SSHDESK falls back when they are absent. Wayland input
-requires `ydotoold` to have access to `/dev/uinput`; do not run the whole
-SSHDESK server as root.
+installation, GNOME needs PyGObject, GStreamer base introspection, and the
+GStreamer PipeWire plugin. Other Wayland desktops need their listed capture
+command and ydotool 1.0.4 or newer. FFmpeg and NumPy/OpenCV are X11 acceleration
+paths. Non-GNOME Wayland input requires `ydotoold` access to `/dev/uinput`; do
+not run the whole SSHDESK server as root.
 
 From the repository on the server:
 
@@ -165,7 +162,7 @@ XDG_CURRENT_DESKTOP,DBUS_SESSION_BUS_ADDRESS,YDOTOOL_SOCKET \
   ./scripts/install-server.sh "$USER" "${DISPLAY:-}" "${XAUTHORITY:-}"
 ```
 
-This records the compositor, runtime, D-Bus, and ydotool settings. Check the
+This records the compositor, runtime, D-Bus, and optional ydotool settings. Check the
 resulting root-owned `/etc/sshdesk/USER.conf` before enabling the forced command.
 
 Verify backend access first:

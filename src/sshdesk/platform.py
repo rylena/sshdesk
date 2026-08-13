@@ -21,6 +21,9 @@ def detect_platform() -> PlatformSelection:
     if system == "Linux":
         session = os.environ.get("XDG_SESSION_TYPE", "").lower()
         if os.environ.get("WAYLAND_DISPLAY") and session != "x11":
+            desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+            if "gnome" in desktop or "unity" in desktop:
+                return PlatformSelection(system, "wayland", "gnome", "mutter")
             return PlatformSelection(system, "wayland", "wayland", "ydotool")
         if os.environ.get("DISPLAY"):
             return PlatformSelection(system, "x11", "x11", "x11")
@@ -43,6 +46,10 @@ def create_capture(name: str = "auto", display: str | None = None) -> ScreenCapt
         from sshdesk.capture.wayland import WaylandCapture
 
         return WaylandCapture()
+    if backend == "gnome":
+        from sshdesk.capture.gnome import GnomeScreenCastCapture
+
+        return GnomeScreenCastCapture()
     if backend == "native":
         from sshdesk.capture.native import NativeCapture
 
@@ -59,11 +66,15 @@ def create_input(
     display: str | None = None,
     *,
     enabled: bool = True,
+    capture: ScreenCapture | None = None,
 ) -> InputBackend:
     if not enabled:
         return NullInputBackend()
     selected = detect_platform() if name == "auto" else None
     backend = selected.input if selected is not None else name
+    provider = getattr(capture, "create_input_backend", None)
+    if backend == "mutter" and callable(provider):
+        return provider()
     if backend == "x11":
         from sshdesk.input.x11 import X11Input
 
@@ -72,6 +83,8 @@ def create_input(
         from sshdesk.input.ydotool import YdotoolInput
 
         return YdotoolInput()
+    if backend == "mutter":
+        raise RuntimeError("Mutter input requires a linked GNOME capture session")
     if backend == "quartz":
         from sshdesk.input.macos import MacOSInput
 

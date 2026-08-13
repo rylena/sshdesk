@@ -39,7 +39,7 @@ class AgentController:
     @property
     def input(self) -> InputBackend:
         if self._input is None:
-            self._input = create_input()
+            self._input = create_input(capture=self.capture)
         return self._input
 
     def info(self) -> dict[str, object]:

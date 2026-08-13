@@ -8,23 +8,19 @@ socket.
 
 Run `sshdesk-server` as the graphical desktop user, never as root. X11 capture
 and XTest input require access to the target `DISPLAY` and its Xauthority cookie.
-Wayland capture needs the logged-in session's runtime/D-Bus environment, and
-ydotool input needs a narrowly configured `ydotoold` with `/dev/uinput` access.
-On systemd Linux hosts, the one-line installer isolates that helper in
+Wayland capture needs the logged-in session's runtime/D-Bus environment. GNOME
+capture and input use linked Mutter sessions as the unprivileged graphical user;
+there is no screenshot extension, root process, or input device helper on this
+path. On other Wayland desktops, ydotool input needs a narrowly configured
+`ydotoold` with `/dev/uinput` access. On systemd Linux hosts, the one-line installer isolates that helper in
 `sshdesk-ydotoold.service`, exposes a mode-0600 Unix socket owned by the desktop
 user, and restricts the service device policy to `/dev/uinput`. The downloaded
 x86-64 helper is pinned and SHA-256 verified; incompatible systems build the
 same pinned source release locally. The installer also loads the `uinput`
-kernel module at boot when it is modular.
-
-GNOME 49/50 blocks the legacy screenshot command by default. SSHDESK installs
-the GNOME-reviewed `Allow gnome-screenshot` extension only on those versions;
-it adds the single `org.gnome.Screenshot` D-Bus name to GNOME Shell's capture
-allowlist instead of enabling Shell's global unsafe mode. This intentionally
-allows processes running as the graphical user to invoke that command, which is
-necessary for the current GNOME backend. The extension is independently
-licensed AGPL-3.0-or-later and downloaded from GNOME Extensions with a pinned
-SHA-256 checksum; it is not bundled into SSHDESK.
+kernel module at boot when it is modular. GNOME's ScreenCast and RemoteDesktop
+interfaces are compositor-private APIs, so compatibility is validated by the
+installer's live capture/input preflight rather than assumed from a version
+number.
 Keep session credentials private. If a different dedicated SSH account is used,
 granting it access to the graphical session is effectively granting console control.
 The MIT-SHM capture segment is created mode 0600 and immediately marked for

@@ -28,10 +28,10 @@ def create_capture(config: ServerConfig) -> ScreenCapture:
     return create_platform_capture(config.capture, config.display)
 
 
-def create_input(config: ServerConfig) -> InputBackend:
+def create_input(config: ServerConfig, capture: ScreenCapture | None = None) -> InputBackend:
     if not config.input_enabled or config.capture == "synthetic":
         return NullInputBackend()
-    return create_platform_input(config.input, config.display)
+    return create_platform_input(config.input, config.display, capture=capture)
 
 
 def _capabilities(args: argparse.Namespace) -> TerminalCapabilities:
@@ -51,12 +51,12 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--capture",
-        choices=("auto", "x11", "wayland", "native", "synthetic"),
+        choices=("auto", "x11", "gnome", "wayland", "native", "synthetic"),
         default="auto",
     )
     parser.add_argument(
         "--input",
-        choices=("auto", "x11", "ydotool", "quartz", "sendinput", "none"),
+        choices=("auto", "x11", "mutter", "ydotool", "quartz", "sendinput", "none"),
         default="auto",
     )
     parser.add_argument("--display", help="X11 display (defaults to DISPLAY)")
@@ -87,7 +87,7 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
     input_backend: InputBackend | None = None
     try:
         capture = create_capture(config)
-        input_backend = create_input(config)
+        input_backend = create_input(config, capture)
         if args.check:
             frame = capture.capture()
             print(

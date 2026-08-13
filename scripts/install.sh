@@ -13,9 +13,6 @@ YDOTOOL_SHA256="daa83507a596d6839b7467540382dbdc6e4bf64ebfa4f7d6416e877d9a522c0c
 YDOTOOLD_SHA256="3f14f96308935214c0fb154507360f7632e7deda1935dc2d538259fd9986ed36"
 YDOTOOL_SOURCE_URL="https://github.com/ReimuNotMoe/ydotool/archive/refs/tags/v1.0.4.tar.gz"
 YDOTOOL_SOURCE_SHA256="ba075a43aa6ead51940e892ecffa4d0b8b40c241e4e2bc4bd9bd26b61fde23bd"
-GNOME_SCREENSHOT_EXTENSION_UUID="allow-gnome-screenshot@siddh.me"
-GNOME_SCREENSHOT_EXTENSION_URL="https://extensions.gnome.org/review/download/70161.shell-extension.zip"
-GNOME_SCREENSHOT_EXTENSION_SHA256="8298e90879aa7a17cd1f10934f118c3370daa775ae95c7df8e7adfc703fc26d3"
 tailscale_choice="ask"
 requested_user="${SSHDESK_USER-}"
 temporary_directory=""
@@ -165,7 +162,6 @@ install_prerequisites() {
 install_linux_capture_package() {
     family="$1"
     case "${family}" in
-        gnome) executable="gnome-screenshot" ;;
         kde) executable="spectacle" ;;
         wlroots) executable="grim" ;;
         *) fail "unknown Wayland desktop family: ${family}" ;;
@@ -175,7 +171,6 @@ install_linux_capture_package() {
     say "Installing ${family} Wayland capture support..."
     if command -v apt-get >/dev/null 2>&1; then
         case "${family}" in
-            gnome) package="gnome-screenshot" ;;
             kde) package="kde-spectacle" ;;
             wlroots) package="grim" ;;
         esac
@@ -183,35 +178,30 @@ install_linux_capture_package() {
         ${as_root} apt-get install -y "${package}"
     elif command -v dnf >/dev/null 2>&1; then
         case "${family}" in
-            gnome) package="gnome-screenshot" ;;
             kde) package="spectacle" ;;
             wlroots) package="grim" ;;
         esac
         ${as_root} dnf install -y "${package}"
     elif command -v yum >/dev/null 2>&1; then
         case "${family}" in
-            gnome) package="gnome-screenshot" ;;
             kde) package="spectacle" ;;
             wlroots) package="grim" ;;
         esac
         ${as_root} yum install -y "${package}"
     elif command -v pacman >/dev/null 2>&1; then
         case "${family}" in
-            gnome) package="gnome-screenshot" ;;
             kde) package="spectacle" ;;
             wlroots) package="grim" ;;
         esac
         ${as_root} pacman -Sy --needed --noconfirm "${package}"
     elif command -v zypper >/dev/null 2>&1; then
         case "${family}" in
-            gnome) package="gnome-screenshot" ;;
             kde) package="spectacle" ;;
             wlroots) package="grim" ;;
         esac
         ${as_root} zypper --non-interactive install "${package}"
     elif command -v apk >/dev/null 2>&1; then
         case "${family}" in
-            gnome) package="gnome-screenshot" ;;
             kde) package="spectacle" ;;
             wlroots) package="grim" ;;
         esac
@@ -223,77 +213,47 @@ install_linux_capture_package() {
         fail "${executable} is unavailable after package installation"
 }
 
-run_gnome_extension_command() {
-    run_as_desktop_user env \
-        "HOME=${desktop_user_home}" \
-        "DISPLAY=${DISPLAY-}" \
-        "WAYLAND_DISPLAY=${WAYLAND_DISPLAY-}" \
-        "XDG_RUNTIME_DIR=${desktop_runtime_directory}" \
-        "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP-}" \
-        "DBUS_SESSION_BUS_ADDRESS=${desktop_bus_address}" \
-        "XDG_DATA_HOME=${desktop_data_home}" \
-        "XDG_CONFIG_HOME=${desktop_config_home}" \
-        "$@"
+gnome_streaming_is_ready() {
+    python3 -c '
+import gi
+gi.require_version("Gio", "2.0")
+gi.require_version("Gst", "1.0")
+gi.require_version("GstApp", "1.0")
+gi.require_version("GstVideo", "1.0")
+from gi.repository import Gst
+Gst.init(None)
+raise SystemExit(0 if Gst.ElementFactory.find("pipewiresrc") else 1)
+' >/dev/null 2>&1
 }
 
-gnome_screenshot_extension_is_active() {
-    run_gnome_extension_command gnome-extensions info \
-        "${GNOME_SCREENSHOT_EXTENSION_UUID}" 2>/dev/null | \
-        grep -q 'State: ACTIVE'
-}
-
-install_gnome_screenshot_access() {
-    command -v gnome-shell >/dev/null 2>&1 || return
-    shell_version="$(gnome-shell --version 2>/dev/null | awk '{print $NF}')"
-    shell_major="${shell_version%%.*}"
-    case "${shell_major}" in
-        ''|*[!0-9]*) return ;;
-    esac
-    [ "${shell_major}" -ge 49 ] || return
-
-    command -v gnome-extensions >/dev/null 2>&1 || \
-        fail "GNOME 49+ capture needs the gnome-extensions command"
-    desktop_user_home="$(getent passwd "${requested_user}" | cut -d: -f6)"
-    [ -n "${desktop_user_home}" ] || fail "could not find ${requested_user}'s home directory"
-    desktop_uid="$(id -u "${requested_user}")"
-    desktop_runtime_directory="${XDG_RUNTIME_DIR:-/run/user/${desktop_uid}}"
-    desktop_bus_address="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${desktop_runtime_directory}/bus}"
-    if [ "$(id -un)" = "${requested_user}" ]; then
-        desktop_data_home="${XDG_DATA_HOME:-${desktop_user_home}/.local/share}"
-        desktop_config_home="${XDG_CONFIG_HOME:-${desktop_user_home}/.config}"
+install_gnome_streaming_support() {
+    gnome_streaming_is_ready && return
+    say "Installing persistent GNOME PipeWire capture support..."
+    if command -v apt-get >/dev/null 2>&1; then
+        ${as_root} apt-get update
+        ${as_root} apt-get install -y \
+            python3-gi gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+            gstreamer1.0-plugins-base gstreamer1.0-pipewire
+    elif command -v dnf >/dev/null 2>&1; then
+        ${as_root} dnf install -y \
+            python3-gobject gstreamer1 gstreamer1-plugins-base pipewire-gstreamer
+    elif command -v yum >/dev/null 2>&1; then
+        ${as_root} yum install -y \
+            python3-gobject gstreamer1 gstreamer1-plugins-base pipewire-gstreamer
+    elif command -v pacman >/dev/null 2>&1; then
+        ${as_root} pacman -Sy --needed --noconfirm \
+            python-gobject gstreamer gst-plugins-base gst-plugin-pipewire
+    elif command -v zypper >/dev/null 2>&1; then
+        ${as_root} zypper --non-interactive install \
+            python3-gobject gstreamer gstreamer-plugins-base gstreamer-plugin-pipewire
+    elif command -v apk >/dev/null 2>&1; then
+        ${as_root} apk add \
+            py3-gobject3 gstreamer gst-plugins-base gst-plugin-pipewire
     else
-        desktop_data_home="${desktop_user_home}/.local/share"
-        desktop_config_home="${desktop_user_home}/.config"
+        fail "install PyGObject, GStreamer, and its PipeWire plugin, then rerun"
     fi
-
-    if gnome_screenshot_extension_is_active; then
-        return
-    fi
-
-    say "Installing GNOME ${shell_major} screenshot access for SSHDESK..."
-    extension_archive="${temporary_directory}/allow-gnome-screenshot.shell-extension.zip"
-    curl -fsSL "${GNOME_SCREENSHOT_EXTENSION_URL}" -o "${extension_archive}"
-    command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
-    printf '%s  %s\n' \
-        "${GNOME_SCREENSHOT_EXTENSION_SHA256}" "${extension_archive}" | sha256sum -c -
-    # A root-launched installer still installs this as the graphical user.
-    chmod 0755 "${temporary_directory}"
-    chmod 0644 "${extension_archive}"
-    run_gnome_extension_command gnome-extensions install --force "${extension_archive}"
-
-    attempts=0
-    while [ "${attempts}" -lt 30 ]; do
-        run_gnome_extension_command gnome-extensions enable \
-            "${GNOME_SCREENSHOT_EXTENSION_UUID}" >/dev/null 2>&1 || true
-        if gnome_screenshot_extension_is_active; then
-            return
-        fi
-        attempts=$((attempts + 1))
-        sleep 0.2
-    done
-
-    fail "GNOME installed the capture extension but has not loaded it yet; log out of "\
-"the graphical desktop, then log back in and rerun this installer"
+    gnome_streaming_is_ready || \
+        fail "GStreamer PipeWire support is unavailable after package installation"
 }
 
 install_ydotool_binaries() {
@@ -435,10 +395,11 @@ install_linux_desktop_dependencies() {
         *kde*|*plasma*) desktop_family="kde" ;;
         *) desktop_family="wlroots" ;;
     esac
-    install_linux_capture_package "${desktop_family}"
     if [ "${desktop_family}" = "gnome" ]; then
-        install_gnome_screenshot_access
+        install_gnome_streaming_support
+        return
     fi
+    install_linux_capture_package "${desktop_family}"
     install_ydotool_binaries
     configure_ydotool_service
 }

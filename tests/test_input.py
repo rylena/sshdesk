@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from sshdesk.input.events import (
     ControlEvent,
@@ -13,6 +14,7 @@ from sshdesk.input.events import (
     MouseScrollEvent,
     TerminalReportEvent,
 )
+from sshdesk.input.mutter import MutterInput
 from sshdesk.input.terminal import TerminalEventParser, translate_coordinates
 from sshdesk.render.base import Viewport
 from sshdesk.render.kitty import PixelViewport, translate_pixel_coordinates
@@ -104,6 +106,52 @@ class InputTests(unittest.TestCase):
         self.assertIsNone(translate_pixel_coordinates(79, 40, viewport))
         self.assertEqual(translate_pixel_coordinates(80, 40, viewport), (1, 1))
         self.assertEqual(translate_pixel_coordinates(879, 489, viewport), (1918, 1078))
+
+    def test_mutter_input_uses_linked_stream_and_bounds_pointer(self) -> None:
+        calls: list[tuple[str, str, tuple[object, ...]]] = []
+
+        class FakeBus:
+            @staticmethod
+            def call_sync(
+                _name: str,
+                _path: str,
+                _interface: str,
+                method: str,
+                parameters: object,
+                *_args: object,
+            ) -> None:
+                calls.append((method, parameters.signature, parameters.values))
+
+        class Variant:
+            def __init__(self, signature: str, values: tuple[object, ...]) -> None:
+                self.signature = signature
+                self.values = values
+
+        backend = MutterInput(
+            FakeBus(),
+            SimpleNamespace(DBusCallFlags=SimpleNamespace(NONE=0)),
+            SimpleNamespace(Variant=Variant, Error=RuntimeError),
+            "/remote/session",
+            "/screen/stream",
+            lambda: (1920, 1080),
+        )
+        backend.move(9999, -50)
+        backend.key(KeyEvent(2, int(Modifiers.CTRL), int(KeyCode.CHARACTER), ord("c")))
+        backend.button(1, True, 20, 30)
+        backend.button(1, False, 20, 30)
+        backend.close()
+
+        self.assertEqual(
+            calls[0],
+            (
+                "NotifyPointerMotionAbsolute",
+                "(sdd)",
+                ("/screen/stream", 1919.0, 0.0),
+            ),
+        )
+        self.assertIn(("NotifyKeyboardKeycode", "(ub)", (29, True)), calls)
+        self.assertIn(("NotifyKeyboardKeysym", "(ub)", (ord("c"), True)), calls)
+        self.assertIn(("NotifyPointerButton", "(ib)", (0x110, True)), calls)
 
 
 if __name__ == "__main__":

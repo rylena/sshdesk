@@ -117,6 +117,17 @@ class AgentTests(unittest.TestCase):
         ):
             selected = detect_platform()
             self.assertEqual((selected.capture, selected.input), ("wayland", "ydotool"))
+        with patch("sshdesk.platform.platform.system", return_value="Linux"), patch.dict(
+            "os.environ",
+            {
+                "WAYLAND_DISPLAY": "wayland-0",
+                "XDG_SESSION_TYPE": "wayland",
+                "XDG_CURRENT_DESKTOP": "GNOME",
+            },
+            clear=True,
+        ):
+            selected = detect_platform()
+            self.assertEqual((selected.capture, selected.input), ("gnome", "mutter"))
         with patch("sshdesk.platform.platform.system", return_value="Darwin"):
             self.assertEqual((detect_platform().capture, detect_platform().input), ("native", "quartz"))
         with patch("sshdesk.platform.platform.system", return_value="Windows"):
