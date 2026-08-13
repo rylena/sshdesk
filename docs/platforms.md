@@ -43,6 +43,13 @@ user. SSHDESK itself stays unprivileged. On an existing installation, rerun the
 one-line installer locally from the graphical session to repair missing Wayland
 dependencies and revalidate capture.
 
+GNOME 49 removed `org.gnome.Screenshot` from Shell's private screenshot API
+allowlist. On GNOME 49 and 50, the installer therefore installs the active,
+GNOME-reviewed `allow-gnome-screenshot@siddh.me` compatibility extension and
+enables it for the graphical user. A newly copied extension may require one
+graphical logout/login before GNOME loads it; rerun the installer afterward so
+the real-frame preflight can finish.
+
 Command-based GNOME/KDE capture is functional but slower than X11 or grim. A
 PipeWire backend is the intended high-throughput replacement. Compositors that
 provide none of the listed capture interfaces need a backend adapter.

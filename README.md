@@ -116,7 +116,11 @@ gnome-screenshot, or spectacle`, log into that computer's graphical desktop,
 open its local terminal, and rerun the Linux/macOS one-line command above. It
 installs the correct capture dependency, configures the narrowly scoped input
 helper, checks a real frame, and preserves the existing SSHDESK login. Then
-retry the ordinary SSH command from the client.
+retry the ordinary SSH command from the client. GNOME 49 and 50 also require
+the GNOME-reviewed [Allow gnome-screenshot extension](https://extensions.gnome.org/extension/9127/allow-gnome-screenshot/),
+which the installer downloads, verifies, and enables automatically. If GNOME
+has not loaded a newly installed extension yet, log out of the graphical
+desktop once, log back in, and rerun the installer.
 
 ## Linux host details
 

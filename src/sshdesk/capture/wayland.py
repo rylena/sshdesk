@@ -46,13 +46,18 @@ class WaylandCapture(ScreenCapture):
 
     @staticmethod
     def _run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(
-            command,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=5.0,
-        )
+        try:
+            return subprocess.run(
+                command,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=5.0,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"{command[0]} Wayland capture timed out after {exc.timeout:g} seconds"
+            ) from exc
 
     def _grab(self) -> Image.Image:
         if self.backend == "grim":

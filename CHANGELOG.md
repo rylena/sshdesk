@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5
+
+- restore non-interactive capture on GNOME 49 and 50 with the reviewed compatibility extension
+- pin and verify the GNOME extension bundle before installing it as the graphical user
+- turn Wayland screenshot-helper timeouts into clean SSHDESK errors instead of tracebacks
+- document the GNOME capture permission and one-time extension reload requirement
+
 ## 0.3.4
 
 - detect GNOME, KDE Plasma, and wlroots Wayland sessions during installation
