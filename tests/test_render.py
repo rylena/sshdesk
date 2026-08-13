@@ -193,7 +193,7 @@ class RenderTests(unittest.TestCase):
             ),
             (1920, 1080),
         )
-        self.assertEqual(rendered.tiles[0].rgb[:3], bytes((12, 34, 56)))
+        self.assertEqual(rendered.image.getpixel((0, 0)), (12, 34, 56))
 
     def test_kitty_writer_emits_chunked_paletted_png(self) -> None:
         renderer = KittyRenderer(self.graphics_probe())
@@ -202,15 +202,39 @@ class RenderTests(unittest.TestCase):
             TerminalCapabilities("xterm-kitty", ColorMode.TRUECOLOR, True, True, True),
             self.graphics_probe(),
         )
-        output = writer._place_rgb(frame.tiles[0])
+        tile = renderer._materialize_tile(frame, frame.tiles[0])
+        output = writer._place_rgb(tile)
         self.assertIn(b"\x1b_Ga=T", output)
         self.assertIn(b"f=100", output)
         self.assertIn(b"q=1", output)
         commands = re.findall(rb"\x1b_G([^;]+);([^\x1b]*)\x1b\\", output)
         payload = b"".join(data for keys, data in commands if b"a=T" in keys or keys.startswith(b"m="))
         decoded = Image.open(io.BytesIO(base64.b64decode(payload))).convert("RGB")
-        self.assertEqual(decoded.size, (frame.tiles[0].width, frame.tiles[0].height))
-        self.assertLess(len(payload), len(base64.b64encode(frame.tiles[0].rgb)))
+        self.assertEqual(decoded.size, (tile.width, tile.height))
+        self.assertLess(len(payload), len(base64.b64encode(tile.rgb)))
+
+    def test_kitty_writer_uses_one_canvas_for_large_updates(self) -> None:
+        renderer = KittyRenderer(self.graphics_probe())
+        source = SyntheticCapture(1280, 720, animate=False)
+        first = renderer.render(source.capture(), 120, 36)
+        writer = KittyWriter(
+            TerminalCapabilities("xterm-kitty", ColorMode.TRUECOLOR, True, True, True),
+            self.graphics_probe(),
+        )
+        full = writer.full(first)
+        self.assertEqual(full.count(b"\x1b_Ga=T"), 1)
+        self.assertIn(b"z=-2", full)
+
+        second = renderer.render(
+            Frame(Image.new("RGB", (1280, 720), "white"), 2),
+            120,
+            36,
+        )
+        update = renderer.diff(first, second)
+        self.assertGreaterEqual(update.changed_percentage, 25.0)
+        delta = writer.update(update)
+        self.assertEqual(delta.count(b"\x1b_Ga=T"), 1)
+        self.assertIn(b"d=Z,z=-1", delta)
 
     def test_kitty_graphics_are_wrapped_for_tmux(self) -> None:
         renderer = KittyRenderer(self.graphics_probe())
@@ -220,7 +244,7 @@ class RenderTests(unittest.TestCase):
                 TerminalCapabilities("xterm-kitty", ColorMode.TRUECOLOR, True, True, True),
                 self.graphics_probe(),
             )
-        output = writer._place_rgb(frame.tiles[0])
+        output = writer._place_rgb(renderer._materialize_tile(frame, frame.tiles[0]))
         self.assertTrue(output.startswith(b"\x1bPtmux;\x1b\x1b_G"))
         self.assertIn(b"\x1b\\", output)
         self.assertEqual(

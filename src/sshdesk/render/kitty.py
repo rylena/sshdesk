@@ -7,7 +7,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from sshdesk.capture.base import Frame
 
@@ -17,10 +17,12 @@ from .probe import GraphicsProbe
 from .writer import CSI, TerminalWriter
 
 CHUNK_SIZE = 4096
+FULL_IMAGE_IDS = (0x7500, 0x7501)
 IMAGE_ID_BASE = 0x7600
 CURSOR_IMAGE_ID = 0x47600
 PLACEMENT_ID = 1
 TILE_TARGET_PIXELS = 96
+FULL_REPLACE_THRESHOLD = 25.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,7 @@ class KittyRenderedFrame:
     pixel_viewport: PixelViewport
     cell_width: int
     cell_height: int
+    image: Image.Image
     tiles: tuple[KittyTile, ...]
 
 
@@ -185,12 +188,8 @@ class KittyRenderer:
             rows_here = min(tile_rows, cell_rows - row)
             for tile_x, column in enumerate(range(0, cell_columns, tile_columns)):
                 columns_here = min(tile_columns, cell_columns - column)
-                x = column * cell_width
-                y = row * cell_height
                 tile_width = columns_here * cell_width
                 tile_height = rows_here * cell_height
-                rgb = image.crop((x, y, x + tile_width, y + tile_height)).tobytes()
-                digest = hashlib.blake2s(rgb, digest_size=8).digest()
                 image_id = IMAGE_ID_BASE + tile_y * 1024 + tile_x
                 tiles.append(
                     KittyTile(
@@ -199,8 +198,8 @@ class KittyRenderer:
                         top + row,
                         tile_width,
                         tile_height,
-                        digest,
-                        rgb,
+                        b"",
+                        b"",
                     )
                 )
         return KittyRenderedFrame(
@@ -210,7 +209,25 @@ class KittyRenderer:
             pixel_viewport,
             cell_width,
             cell_height,
+            image,
             tuple(tiles),
+        )
+
+    @staticmethod
+    def _materialize_tile(
+        frame: KittyRenderedFrame, tile: KittyTile
+    ) -> KittyTile:
+        x = (tile.column - frame.viewport.x) * frame.cell_width
+        y = (tile.row - frame.viewport.y) * frame.cell_height
+        rgb = frame.image.crop((x, y, x + tile.width, y + tile.height)).tobytes()
+        return KittyTile(
+            tile.image_id,
+            tile.column,
+            tile.row,
+            tile.width,
+            tile.height,
+            hashlib.blake2s(rgb, digest_size=8).digest(),
+            rgb,
         )
 
     def diff(
@@ -228,14 +245,29 @@ class KittyRenderer:
             or len(previous.tiles) != len(current.tiles)
         ):
             return KittyFrameUpdate(UpdateKind.FULL, current, current.tiles)
-        changes = tuple(
-            tile
-            for old, tile in zip(previous.tiles, current.tiles)
-            if old.image_id != tile.image_id or old.digest != tile.digest
-        )
+        difference = ImageChops.difference(previous.image, current.image)
+        changed_bounds = difference.getbbox()
+        if changed_bounds is None:
+            return KittyFrameUpdate(UpdateKind.UNCHANGED, current)
+        left, top, right, bottom = changed_bounds
+        total_pixels = current.pixel_viewport.width * current.pixel_viewport.height
+        changed_pixels = 0
+        changes: list[KittyTile] = []
+        for tile in current.tiles:
+            x = (tile.column - current.viewport.x) * current.cell_width
+            y = (tile.row - current.viewport.y) * current.cell_height
+            if x >= right or y >= bottom or x + tile.width <= left or y + tile.height <= top:
+                continue
+            box = (x, y, x + tile.width, y + tile.height)
+            if difference.crop(box).getbbox() is None:
+                continue
+            changes.append(self._materialize_tile(current, tile))
+            changed_pixels += tile.width * tile.height
+            if changed_pixels * 100 >= total_pixels * FULL_REPLACE_THRESHOLD:
+                return KittyFrameUpdate(UpdateKind.FULL, current, current.tiles)
         if not changes:
             return KittyFrameUpdate(UpdateKind.UNCHANGED, current)
-        return KittyFrameUpdate(UpdateKind.DELTA, current, changes)
+        return KittyFrameUpdate(UpdateKind.DELTA, current, tuple(changes))
 
 
 class KittyWriter(TerminalWriter):
@@ -250,6 +282,7 @@ class KittyWriter(TerminalWriter):
         super().__init__(capabilities, title)
         self.probe = probe
         self._cursor_loaded = False
+        self._base_image_id: int | None = None
         self._encoder_pool: ThreadPoolExecutor | None = None
         self._tmux = bool(os.environ.get("TMUX"))
 
@@ -263,6 +296,12 @@ class KittyWriter(TerminalWriter):
             self._encoder_pool.shutdown(wait=True, cancel_futures=True)
             self._encoder_pool = None
 
+    def reset_canvas(self) -> bytes:
+        """Forget all terminal-side images after a resize or screen reset."""
+        self._base_image_id = None
+        self._cursor_loaded = False
+        return self._graphics(b"\x1b_Ga=d,d=A,q=1\x1b\\") + (CSI + "2J" + CSI + "H").encode()
+
     def enter(self) -> bytes:
         self._active = True
         value = self._title_enter() + CSI + "?1049h" + CSI + "?25l" + CSI + "?7l"
@@ -275,6 +314,7 @@ class KittyWriter(TerminalWriter):
     def leave(self) -> bytes:
         self._active = False
         self._cursor_loaded = False
+        self._base_image_id = None
         terminal_reset = (
             CSI
             + "0m"
@@ -292,7 +332,7 @@ class KittyWriter(TerminalWriter):
             + "?1049l"
             + self._title_leave()
         ).encode()
-        return self._graphics(b"\x1b_Ga=d,d=A,q=2\x1b\\") + terminal_reset
+        return self._graphics(b"\x1b_Ga=d,d=A,q=1\x1b\\") + terminal_reset
 
     @staticmethod
     def _chunks(payload: bytes) -> tuple[bytes, ...]:
@@ -318,7 +358,7 @@ class KittyWriter(TerminalWriter):
         chunks = self._chunks(encoded)
         output = bytearray(
             self._graphics(
-                f"\x1b_Ga=d,d=i,i={tile.image_id},p={PLACEMENT_ID},q=2\x1b\\".encode()
+                f"\x1b_Ga=d,d=i,i={tile.image_id},p={PLACEMENT_ID},q=1\x1b\\".encode()
             )
         )
         output.extend(f"{CSI}{tile.row + 1};{tile.column + 1}H".encode())
@@ -339,13 +379,71 @@ class KittyWriter(TerminalWriter):
             output.extend(self._graphics(bytes(command)))
         return bytes(output)
 
+    @staticmethod
+    def _palette_png(image: Image.Image) -> bytes:
+        image = image.quantize(
+            colors=128,
+            method=Image.Quantize.FASTOCTREE,
+            dither=Image.Dither.NONE,
+        )
+        output_file = io.BytesIO()
+        image.save(output_file, format="PNG", compress_level=1, optimize=False)
+        return output_file.getvalue()
+
+    def _place_full(self, frame: KittyRenderedFrame, image_id: int) -> bytes:
+        """Transmit one canvas image instead of making the terminal decode every tile."""
+        png = self._palette_png(frame.image)
+        chunks = self._chunks(base64.b64encode(png))
+        output = bytearray(
+            f"{CSI}{frame.viewport.y + 1};{frame.viewport.x + 1}H".encode()
+        )
+        first = chunks[0] if chunks else b""
+        more = 1 if len(chunks) > 1 else 0
+        command = bytearray(
+            f"\x1b_Ga=T,q=1,C=1,z=-2,f=100,i={image_id},"
+            f"p={PLACEMENT_ID},m={more};".encode()
+        )
+        command.extend(first)
+        command.extend(b"\x1b\\")
+        output.extend(self._graphics(bytes(command)))
+        for index, chunk in enumerate(chunks[1:], 1):
+            more = 1 if index < len(chunks) - 1 else 0
+            command = bytearray(f"\x1b_Gm={more},q=1;".encode())
+            command.extend(chunk)
+            command.extend(b"\x1b\\")
+            output.extend(self._graphics(bytes(command)))
+        return bytes(output)
+
+    def _replace_full(self, frame: KittyRenderedFrame) -> bytes:
+        """Atomically swap the desktop canvas and discard obsolete delta tiles."""
+        image_id = FULL_IMAGE_IDS[0]
+        if self._base_image_id == image_id:
+            image_id = FULL_IMAGE_IDS[1]
+        output = bytearray()
+        if self.probe.synchronized_output:
+            output.extend((CSI + "?2026h").encode())
+        if self._base_image_id is None:
+            output.extend(self.reset_canvas())
+        output.extend(self._place_full(frame, image_id))
+        output.extend(self._graphics(b"\x1b_Ga=d,d=Z,z=-1,q=1\x1b\\"))
+        if self._base_image_id is not None:
+            output.extend(
+                self._graphics(
+                    f"\x1b_Ga=d,d=I,i={self._base_image_id},q=1\x1b\\".encode()
+                )
+            )
+        self._base_image_id = image_id
+        if self.probe.synchronized_output:
+            output.extend((CSI + "?2026l").encode())
+        return bytes(output)
+
     def _frame(self, tiles: tuple[KittyTile, ...], *, clear: bool = False) -> bytes:
         output = bytearray()
         if self.probe.synchronized_output:
             output.extend((CSI + "?2026h").encode())
         if clear:
             self._cursor_loaded = False
-            output.extend(self._graphics(b"\x1b_Ga=d,d=A,q=2\x1b\\"))
+            output.extend(self._graphics(b"\x1b_Ga=d,d=A,q=1\x1b\\"))
             output.extend((CSI + "2J" + CSI + "H").encode())
         if len(tiles) >= 4:
             if self._encoder_pool is None:
@@ -363,9 +461,11 @@ class KittyWriter(TerminalWriter):
         return bytes(output)
 
     def full(self, frame: KittyRenderedFrame) -> bytes:
-        return self._frame(frame.tiles, clear=True)
+        return self._replace_full(frame)
 
     def delta(self, update: KittyFrameUpdate) -> bytes:
+        if update.changed_percentage >= FULL_REPLACE_THRESHOLD:
+            return self._replace_full(update.frame)
         return self._frame(update.changes)
 
     def update(self, update: KittyFrameUpdate) -> bytes:

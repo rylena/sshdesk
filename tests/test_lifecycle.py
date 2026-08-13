@@ -183,7 +183,7 @@ class LifecycleTests(unittest.TestCase):
                     output.extend(os.read(master, 65536))
                 except OSError:
                     break
-            self.assertIn(b"\x1b_Ga=d,d=A,q=2", output)
+            self.assertIn(b"\x1b_Ga=d,d=A,q=1", output)
             self.assertIn(b"\x1b[?1016l", output)
             self.assertEqual(_terminal_attributes(slave), before)
         finally:

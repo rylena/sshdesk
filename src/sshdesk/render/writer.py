@@ -226,7 +226,8 @@ class TerminalWriter:
             ),
             (
                 f" cap {stats.capture_ms:4.1f}  render {stats.render_ms:4.1f}  "
-                f"diff {stats.diff_ms:4.1f}  enc {stats.encode_ms:4.1f} ms "
+                f"diff {stats.diff_ms:4.1f}  enc {stats.encode_ms:4.1f}  "
+                f"write {stats.write_ms:4.1f}  age {stats.frame_age_ms:4.1f} ms "
             ),
             (
                 f" tx {stats.bytes_sent_per_second * 8 / 1000:,.0f}  "

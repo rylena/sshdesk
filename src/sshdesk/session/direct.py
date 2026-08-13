@@ -348,7 +348,7 @@ class DirectSession:
                             self.current = None
                         reset = b"\x1b[2J\x1b[H"
                         if isinstance(self.writer, KittyWriter):
-                            reset = b"\x1b_Ga=d,d=A,q=2\x1b\\" + reset
+                            reset = self.writer.reset_canvas()
                         TerminalState.write_all(terminal.output_fd, reset)
                         next_frame = 0.0
 
@@ -408,6 +408,7 @@ class DirectSession:
                         ansi = self.writer.update(update)
                         encoded = time.perf_counter_ns()
                         TerminalState.write_all(terminal.output_fd, ansi)
+                        written = time.perf_counter_ns()
                         self.stats.bytes_sent += len(ansi)
                         last_change = now
                         self.stats.record_frame(
@@ -415,6 +416,10 @@ class DirectSession:
                             render_ms=(rendered_at - started) / 1e6,
                             diff_ms=(diffed - rendered_at) / 1e6,
                             encode_ms=(encoded - diffed) / 1e6,
+                            write_ms=(written - encoded) / 1e6,
+                            frame_age_ms=max(
+                                0.0, (time.monotonic_ns() - frame.captured_ns) / 1e6
+                            ),
                             changed_percentage=update.changed_percentage,
                             full=update.kind == UpdateKind.FULL,
                         )

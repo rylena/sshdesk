@@ -14,6 +14,8 @@ class StatsSnapshot:
     render_ms: float = 0.0
     diff_ms: float = 0.0
     encode_ms: float = 0.0
+    write_ms: float = 0.0
+    frame_age_ms: float = 0.0
     changed_percentage: float = 0.0
     latency_ms: float = 0.0
     bytes_sent_per_second: float = 0.0
@@ -39,6 +41,8 @@ class SessionStats:
         self._render_ms: deque[float] = deque(maxlen=60)
         self._diff_ms: deque[float] = deque(maxlen=60)
         self._encode_ms: deque[float] = deque(maxlen=60)
+        self._write_ms: deque[float] = deque(maxlen=60)
+        self._frame_age_ms: deque[float] = deque(maxlen=60)
         self._changed: deque[float] = deque(maxlen=60)
         self.bytes_sent = 0
         self.bytes_received = 0
@@ -71,6 +75,8 @@ class SessionStats:
         render_ms: float,
         diff_ms: float,
         encode_ms: float,
+        write_ms: float,
+        frame_age_ms: float,
         changed_percentage: float,
         full: bool,
     ) -> None:
@@ -83,6 +89,8 @@ class SessionStats:
             self._render_ms.append(render_ms)
             self._diff_ms.append(diff_ms)
             self._encode_ms.append(encode_ms)
+            self._write_ms.append(write_ms)
+            self._frame_age_ms.append(frame_age_ms)
             self._changed.append(changed_percentage)
             if full:
                 self.full_frames += 1
@@ -122,6 +130,8 @@ class SessionStats:
                 render_ms=self._average(self._render_ms),
                 diff_ms=self._average(self._diff_ms),
                 encode_ms=self._average(self._encode_ms),
+                write_ms=self._average(self._write_ms),
+                frame_age_ms=self._average(self._frame_age_ms),
                 changed_percentage=self._average(self._changed),
                 latency_ms=self.latency_ms,
                 bytes_sent_per_second=self._sent_rate,

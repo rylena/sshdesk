@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- replace large Kitty tile bursts with one atomic, paletted PNG canvas update
+- retain small tile deltas while deferring their pixel copies until a tile actually changes
+- reduce terminal decode work and SSH bandwidth during scrolling and window movement
+- report terminal write time and frame age in the live statistics overlay
+
 ## 0.3.5
 
 - restore non-interactive capture on GNOME 49 and 50 with the reviewed compatibility extension
