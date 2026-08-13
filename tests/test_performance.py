@@ -62,7 +62,9 @@ class PerformanceTests(unittest.TestCase):
             first = pump.latest_after(0, timeout=1.0)
             self.assertIsNotNone(first)
             assert first is not None
-            time.sleep(0.05)
+            deadline = time.monotonic() + 1.0
+            while pump.captured_frames < first.sequence + 2 and time.monotonic() < deadline:
+                time.sleep(0.005)
             newest = pump.latest_after(first.sequence, timeout=1.0)
             self.assertIsNotNone(newest)
             assert newest is not None
