@@ -315,13 +315,23 @@ class GnomeScreenCastCapture(ScreenCapture):
         with self._lock:
             if self._closed:
                 raise RuntimeError("GNOME capture is closed")
-            self._start_pipeline()
-            sink = self._sink
-            if sink is None:
-                raise RuntimeError("the GNOME capture sink is unavailable")
-            sample = sink.emit("try-pull-sample", 2 * self._gst.SECOND)
+            sample = None
+            first_error = ""
+            for attempt in range(2):
+                self._start_pipeline()
+                sink = self._sink
+                if sink is None:
+                    raise RuntimeError("the GNOME capture sink is unavailable")
+                sample = sink.emit("try-pull-sample", 2 * self._gst.SECOND)
+                if sample is not None:
+                    break
+                first_error = self._pipeline_error()
+                if attempt == 0:
+                    # Recover from a transient PipeWire pause or pipeline error
+                    # without dropping the authenticated SSH session.
+                    self._stop_pipeline()
             if sample is None:
-                raise RuntimeError(f"GNOME PipeWire capture failed: {self._pipeline_error()}")
+                raise RuntimeError(f"GNOME PipeWire capture failed: {first_error}")
             caps = sample.get_caps()
             video_info = self._gst_video.VideoInfo.new_from_caps(caps)
             width, height = int(video_info.width), int(video_info.height)

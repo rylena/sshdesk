@@ -52,6 +52,11 @@ class _BlockingCapture(_FastCapture):
         return Frame(Image.new("RGB", target), time.monotonic_ns(), 1920, 1080)
 
 
+class _FailingCapture(_FastCapture):
+    def capture(self) -> Frame:
+        raise RuntimeError("PipeWire stream ended")
+
+
 class PerformanceTests(unittest.TestCase):
     def test_frame_pump_keeps_latest_instead_of_queueing(self) -> None:
         capture = _FastCapture()
@@ -126,6 +131,16 @@ class PerformanceTests(unittest.TestCase):
                 time.sleep(0.005)
             self.assertIn(120.0, capture.rates)
             self.assertIn(10.0, capture.rates)
+        finally:
+            pump.close()
+
+    def test_capture_worker_preserves_backend_error_detail(self) -> None:
+        pump = LatestFramePump(_FailingCapture(), 60)
+        pump.set_target_size(16, 9)
+        pump.start()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "PipeWire stream ended"):
+                pump.latest_after(0, timeout=1.0)
         finally:
             pump.close()
 

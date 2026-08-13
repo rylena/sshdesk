@@ -95,7 +95,7 @@ class LatestFramePump:
                     return None
                 self._condition.wait(remaining)
             if self._error is not None:
-                raise RuntimeError("screen capture worker failed") from self._error
+                raise RuntimeError(f"screen capture worker failed: {self._error}") from self._error
             if self._latest is None or self._latest.sequence <= sequence:
                 return None
             self._delivered_sequence = self._latest.sequence
