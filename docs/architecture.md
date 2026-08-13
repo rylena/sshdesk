@@ -41,7 +41,7 @@ one RemoteDesktop input session, while other Wayland backends remain isolated
 behind the same capture/input abstractions.
 
 The session probes terminal graphics and pixel geometry before starting its input
-thread. A capable terminal receives zlib-compressed RGB tiles through the Kitty
+thread. A capable terminal receives palette-compressed PNG tiles through the Kitty
 graphics protocol; other terminals receive colored half-block cells. The session
 keeps rendered state in both modes. A changed frame becomes either a full redraw
 or a tile/cell delta; an unchanged frame produces no frame output.

@@ -166,7 +166,7 @@ class LifecycleTests(unittest.TestCase):
                 if ready:
                     output.extend(os.read(master, 65536))
             self.assertIn(b"\x1b_Ga=T", output)
-            self.assertIn(b"o=z", output)
+            self.assertIn(b"f=100", output)
             self.assertIn(b"\x1b[?1016h", output)
             os.write(master, b"\x1d\x1d")
             deadline = time.monotonic() + 5

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import os
-import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -302,8 +302,19 @@ class KittyWriter(TerminalWriter):
         )
 
     def _place_rgb(self, tile: KittyTile) -> bytes:
-        compressed = zlib.compress(tile.rgb, level=1)
-        encoded = base64.b64encode(compressed)
+        # Paletted PNG is substantially smaller than lossless RGB/zlib for a
+        # desktop while remaining sharp enough for text and UI chrome. Smaller
+        # updates matter more than a few milliseconds of local encoding once
+        # the byte stream passes through an SSH PTY and terminal parser.
+        image = Image.frombytes("RGB", (tile.width, tile.height), tile.rgb)
+        image = image.quantize(
+            colors=128,
+            method=Image.Quantize.FASTOCTREE,
+            dither=Image.Dither.NONE,
+        )
+        output_file = io.BytesIO()
+        image.save(output_file, format="PNG", compress_level=1, optimize=False)
+        encoded = base64.b64encode(output_file.getbuffer())
         chunks = self._chunks(encoded)
         output = bytearray(
             self._graphics(
@@ -314,15 +325,15 @@ class KittyWriter(TerminalWriter):
         first = chunks[0] if chunks else b""
         more = 1 if len(chunks) > 1 else 0
         first_command = bytearray(
-            f"\x1b_Ga=T,q=2,C=1,z=-1,f=24,i={tile.image_id},p={PLACEMENT_ID},"
-            f"s={tile.width},v={tile.height},o=z,m={more};".encode()
+            f"\x1b_Ga=T,q=1,C=1,z=-1,f=100,i={tile.image_id},p={PLACEMENT_ID},"
+            f"m={more};".encode()
         )
         first_command.extend(first)
         first_command.extend(b"\x1b\\")
         output.extend(self._graphics(bytes(first_command)))
         for index, chunk in enumerate(chunks[1:], 1):
             more = 1 if index < len(chunks) - 1 else 0
-            command = bytearray(f"\x1b_Gm={more},q=2;".encode())
+            command = bytearray(f"\x1b_Gm={more},q=1;".encode())
             command.extend(chunk)
             command.extend(b"\x1b\\")
             output.extend(self._graphics(bytes(command)))
@@ -340,7 +351,7 @@ class KittyWriter(TerminalWriter):
             if self._encoder_pool is None:
                 self._encoder_pool = ThreadPoolExecutor(
                     max_workers=min(4, os.cpu_count() or 1),
-                    thread_name_prefix="sshdesk-zlib",
+                    thread_name_prefix="sshdesk-image-encode",
                 )
             for packet in self._encoder_pool.map(self._place_rgb, tiles):
                 output.extend(packet)
@@ -401,7 +412,7 @@ class KittyWriter(TerminalWriter):
         first = chunks[0] if chunks else b""
         more = 1 if len(chunks) > 1 else 0
         first_command = bytearray(
-            f"\x1b_Ga=T,q=2,C=1,z=1,f=32,i={image_id},p={PLACEMENT_ID},"
+            f"\x1b_Ga=T,q=1,C=1,z=1,f=32,i={image_id},p={PLACEMENT_ID},"
             f"s={width},v={height},X={x_offset},Y={y_offset},m={more};".encode()
         )
         first_command.extend(first)
@@ -409,7 +420,7 @@ class KittyWriter(TerminalWriter):
         output.extend(self._graphics(bytes(first_command)))
         for index, chunk in enumerate(chunks[1:], 1):
             more = 1 if index < len(chunks) - 1 else 0
-            command = bytearray(f"\x1b_Gm={more},q=2;".encode())
+            command = bytearray(f"\x1b_Gm={more},q=1;".encode())
             command.extend(chunk)
             command.extend(b"\x1b\\")
             output.extend(self._graphics(bytes(command)))

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import base64
+import io
 import re
 import unittest
-import zlib
 from unittest.mock import patch
 
 from PIL import Image
@@ -195,7 +195,7 @@ class RenderTests(unittest.TestCase):
         )
         self.assertEqual(rendered.tiles[0].rgb[:3], bytes((12, 34, 56)))
 
-    def test_kitty_writer_emits_chunked_zlib_rgb(self) -> None:
+    def test_kitty_writer_emits_chunked_paletted_png(self) -> None:
         renderer = KittyRenderer(self.graphics_probe())
         frame = renderer.render(SyntheticCapture(160, 90, False).capture(), 20, 8)
         writer = KittyWriter(
@@ -204,11 +204,13 @@ class RenderTests(unittest.TestCase):
         )
         output = writer._place_rgb(frame.tiles[0])
         self.assertIn(b"\x1b_Ga=T", output)
-        self.assertIn(b"o=z", output)
+        self.assertIn(b"f=100", output)
+        self.assertIn(b"q=1", output)
         commands = re.findall(rb"\x1b_G([^;]+);([^\x1b]*)\x1b\\", output)
         payload = b"".join(data for keys, data in commands if b"a=T" in keys or keys.startswith(b"m="))
-        decoded = zlib.decompress(base64.b64decode(payload))
-        self.assertEqual(decoded, frame.tiles[0].rgb)
+        decoded = Image.open(io.BytesIO(base64.b64decode(payload))).convert("RGB")
+        self.assertEqual(decoded.size, (frame.tiles[0].width, frame.tiles[0].height))
+        self.assertLess(len(payload), len(base64.b64encode(frame.tiles[0].rgb)))
 
     def test_kitty_graphics_are_wrapped_for_tmux(self) -> None:
         renderer = KittyRenderer(self.graphics_probe())

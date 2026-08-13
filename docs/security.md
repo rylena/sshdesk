@@ -65,7 +65,7 @@ times, button counts, and response sizes are bounded. Terminal bytes and agent
 fields are never interpreted as shell commands.
 
 Captured pixels are converted either to numeric ANSI colors or base64-encoded,
-zlib-compressed RGB image payloads. Desktop bytes and text are never copied into
+palette-compressed PNG image payloads. Desktop bytes and text are never copied into
 terminal commands, preventing captured content from becoming terminal control
 sequences. Capability-reported dimensions are bounded before allocation.
 

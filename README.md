@@ -43,7 +43,7 @@ mobile clients, and embedded SSH terminals remain usable.
 - mouse movement, left/right/middle click, drag, and wheel scrolling
 - dynamic terminal resize with aspect-ratio-preserving viewport recalculation
 - persistent top bar and terminal title showing the connected device name
-- sharp zlib-compressed RGB tiles through Kitty graphics, including tmux passthrough
+- sharp palette-compressed PNG tiles through Kitty graphics, including tmux passthrough
 - true-color, 256-color, 16-color, Unicode, and ASCII fallbacks
 - latest-frame scheduling that drops stale work instead of accumulating latency
 - 60 FPS sharp / 30 FPS ANSI active targets with adaptive idle presentation
