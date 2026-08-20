@@ -15,6 +15,10 @@
 
 > SSHDESK is a full interactive remote desktop delivered entirely through an SSH session and displayed directly inside your terminal.
 
+## Demo
+
+[Watch the SSHDESK demo](docs/assets/sshdesk-demo.mp4)
+
 Connect with the SSH client you already have:
 
 ```bash
