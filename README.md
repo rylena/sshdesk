@@ -17,7 +17,7 @@
 
 ## Demo
 
-[Watch the SSHDESK demo](docs/assets/sshdesk-demo.mp4)
+[![Play the SSHDESK demo on YouTube](https://img.youtube.com/vi/k9qGXJVsxW0/maxresdefault.jpg)](https://www.youtube.com/watch?v=k9qGXJVsxW0 "Play the SSHDESK demo on YouTube")
 
 Connect with the SSH client you already have:
 
