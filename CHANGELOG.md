@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5
+
+- adapt display FPS under terminal RTT/write backpressure so slow clients stop accumulating visual lag
+- add `SSHDESK_SCALE` / `--scale` to trade detail for smoother output on slower clients
+- dynamically lower automatic render scale under client terminal backpressure and recover when it clears
+- use fewer, larger Kitty graphics tiles so capable terminals spend less time processing image placements
+- pre-scale and fingerprint the Pillow/XCB fallback so static X11 frames avoid unnecessary render work
+
 ## 0.4.4
 
 - keep the GNOME cursor out of the PipeWire framebuffer so motion does not encode frames

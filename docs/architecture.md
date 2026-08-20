@@ -61,7 +61,10 @@ does not starve keyboard or mouse events. The capture rate targets 60 FPS in
 sharp mode or 30 FPS in ANSI mode and stays fresh at that rate. Presentation
 backs off to 30 FPS during light activity and 2 FPS while idle, but input wakes
 it immediately without restarting capture. The active limit can be configured
-from 1 through 120 FPS.
+from 1 through 120 FPS. In automatic scale mode, terminal write time and reply
+latency can lower the render scale to reduce the target capture size until the
+client catches up. A fixed render scale from 0.25 through 1.0 can force the same
+fewer-pixels-per-frame tradeoff.
 
 There is deliberately no SSHDESK application transport or client binary. An
 unmodified SSH client carries one PTY byte stream. Kitty graphics, ANSI/UTF-8,
@@ -81,6 +84,22 @@ agent ── sshdesk-remote ── OpenSSH ── sshdesk-agent session
                                       └── InputBackend
 ```
 
-The forced-command dispatcher accepts only the basename `sshdesk-agent`, parses
-arguments without a shell, and rejects every other original command. Standard
-OpenSSH connection multiplexing can reuse a transport for repeated agent calls.
+The forced-command dispatcher reserves the basename `sshdesk-agent`, parses its
+arguments without a shell, and rejects unrecognized original commands.
+Standard OpenSSH connection multiplexing can reuse a transport for repeated
+agent calls.
+
+## Optional shell path
+
+The exact remote command argument `shell` (or `sshdesk-shell`) opens an
+interactive login shell as the authenticated SSH account. It never uses the
+`RUN_AS` elevation reserved for the desktop and constrained agent paths. Plain
+PTY connections still select SSHDESK; `desktop`, `sshdesk`, and
+`sshdesk-server` select it explicitly. Other original commands remain rejected.
+
+```text
+OpenSSH ForceCommand dispatcher
+    |-- no original command / desktop -- sshdesk-server
+    |-- sshdesk-agent ... -------------- restricted agent parser
+    `-- shell -------------------------- authenticated account login shell
+```

@@ -22,6 +22,7 @@ if [ -r "${config}" ]; then
             SSHDESK_UNICODE) SSHDESK_UNICODE="${value}" ;;
             SSHDESK_X11_CAPTURE) SSHDESK_X11_CAPTURE="${value}" ;;
             SSHDESK_MAX_FPS) SSHDESK_MAX_FPS="${value}" ;;
+            SSHDESK_SCALE) SSHDESK_SCALE="${value}" ;;
         esac
     done < "${config}"
 fi
@@ -45,22 +46,66 @@ export SSHDESK_MOUSE="${SSHDESK_MOUSE-auto}"
 export SSHDESK_UNICODE="${SSHDESK_UNICODE-auto}"
 export SSHDESK_X11_CAPTURE="${SSHDESK_X11_CAPTURE-auto}"
 export SSHDESK_MAX_FPS="${SSHDESK_MAX_FPS-auto}"
+export SSHDESK_SCALE="${SSHDESK_SCALE-auto}"
 
-if [ -n "${SSH_ORIGINAL_COMMAND-}" ]; then
+require_pty() {
+    message="$1"
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "${message}" >&2
+        exit 1
+    fi
+}
+
+run_server() {
+    require_pty "SSHDESK requires an interactive SSH terminal (PTY)."
+    if [ "${RUN_AS}" != "${account}" ]; then
+        exec /usr/bin/sudo -n -u "${RUN_AS}" -- \
+            /usr/local/bin/sshdesk-server
+    fi
+    exec /usr/local/bin/sshdesk-server
+}
+
+run_agent() {
     if [ "${RUN_AS}" != "${account}" ]; then
         exec /usr/bin/sudo -n -u "${RUN_AS}" -- \
             /usr/local/bin/sshdesk-agent-ssh "${SSH_ORIGINAL_COMMAND}"
     fi
     exec /usr/local/bin/sshdesk-agent-ssh "${SSH_ORIGINAL_COMMAND}"
+}
+
+run_shell() {
+    if command -v getent >/dev/null 2>&1; then
+        login_shell="$(getent passwd "${account}" | cut -d: -f7)"
+    else
+        login_shell="${SHELL:-/bin/sh}"
+    fi
+    case "${login_shell}" in
+        /*) ;;
+        *) echo "Invalid SSH login shell." >&2; exit 1 ;;
+    esac
+    [ -x "${login_shell}" ] || {
+        echo "SSH login shell is unavailable: ${login_shell}" >&2
+        exit 1
+    }
+    require_pty "The SSH shell selector requires an interactive terminal (PTY)."
+    exec "${login_shell}" -l
+}
+
+if [ -n "${SSH_ORIGINAL_COMMAND-}" ]; then
+    case "${SSH_ORIGINAL_COMMAND}" in
+        desktop|sshdesk|sshdesk-server)
+            run_server
+            ;;
+        shell|sshdesk-shell)
+            run_shell
+            ;;
+        sshdesk-agent|sshdesk-agent\ *|*/sshdesk-agent|*/sshdesk-agent\ *)
+            run_agent
+            ;;
+        *)
+            run_agent
+            ;;
+    esac
 fi
 
-if [ ! -t 0 ] || [ ! -t 1 ]; then
-    echo "SSHDESK requires an interactive SSH terminal (PTY)." >&2
-    exit 1
-fi
-
-if [ "${RUN_AS}" != "${account}" ]; then
-    exec /usr/bin/sudo -n -u "${RUN_AS}" -- /usr/local/bin/sshdesk-server
-fi
-
-exec /usr/local/bin/sshdesk-server
+run_server

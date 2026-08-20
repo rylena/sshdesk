@@ -293,7 +293,10 @@ def agent_ssh_entrypoint(argv: list[str] | None = None) -> int:
         print(f"sshdesk-agent: invalid SSH command: {exc}", file=sys.stderr)
         return 2
     if not command or Path(command[0]).name != "sshdesk-agent":
-        print("This account accepts only SSHDESK desktop or agent commands.", file=sys.stderr)
+        print(
+            "This account accepts only SSHDESK desktop, shell selector, or agent commands.",
+            file=sys.stderr,
+        )
         return 126
     if "--output" in command[1:] or any(
         value.startswith("--output=") for value in command[1:]

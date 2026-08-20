@@ -75,6 +75,7 @@ class DirectSession:
         input_backend: InputBackend,
         capabilities: TerminalCapabilities | None = None,
         max_fps: float | None = None,
+        render_scale: float | None = None,
     ) -> None:
         self.capture = capture
         self.input = input_backend
@@ -99,6 +100,10 @@ class DirectSession:
         self._latency_probe_ns: int | None = None
         self._last_latency_probe = 0.0
         self._requested_max_fps = max_fps
+        self._requested_render_scale = render_scale
+        self._auto_render_scale = True
+        self._render_scale = 1.0
+        self._last_scale_adjust = 0.0
         self._active_fps = 30.0
         self._frame_pump: LatestFramePump | None = None
 
@@ -106,6 +111,13 @@ class DirectSession:
         mode = os.environ.get("SSHDESK_RENDER", "auto").strip().lower()
         if mode not in {"auto", "ansi", "kitty"}:
             raise RuntimeError("SSHDESK_RENDER must be auto, ansi, or kitty")
+        requested_scale: str | float | None = self._requested_render_scale
+        if requested_scale is None:
+            requested_scale = os.environ.get("SSHDESK_SCALE", "auto")
+        self._auto_render_scale = self._is_auto_render_scale(requested_scale)
+        render_scale = self._parse_render_scale(requested_scale)
+        self._render_scale = render_scale
+        self.renderer = TerminalRenderer(top_margin=1, render_scale=render_scale)
         if mode == "ansi":
             return
         columns, rows = TerminalState.size(output_fd)
@@ -116,7 +128,7 @@ class DirectSession:
             rows=rows,
         )
         if probe.usable:
-            self.renderer = KittyRenderer(probe, top_margin=1)
+            self.renderer = KittyRenderer(probe, top_margin=1, render_scale=render_scale)
             self.writer = KittyWriter(self.capabilities, probe, self.session_title)
             self.pixel_mouse = probe.pixel_mouse
             return
@@ -139,13 +151,105 @@ class DirectSession:
             raise RuntimeError("SSHDESK_MAX_FPS must be between 1 and 120")
         return parsed
 
+    @staticmethod
+    def _parse_render_scale(value: str | float | None) -> float:
+        if value is None or (isinstance(value, str) and value.strip().lower() == "auto"):
+            return 1.0
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("SSHDESK_SCALE must be auto or a number") from exc
+        if not 0.25 <= parsed <= 1.0:
+            raise RuntimeError("SSHDESK_SCALE must be between 0.25 and 1.0")
+        return parsed
+
+    @staticmethod
+    def _is_auto_render_scale(value: str | float | None) -> bool:
+        return value is None or (isinstance(value, str) and value.strip().lower() == "auto")
+
+    @staticmethod
+    def _next_auto_render_scale(
+        current: float,
+        *,
+        latency_ms: float,
+        write_ms: float,
+    ) -> float:
+        if latency_ms >= 250.0 or write_ms >= 30.0:
+            return max(0.5, round(current * 0.75, 2))
+        if latency_ms >= 100.0 or write_ms >= 14.0:
+            return max(0.5, round(current * 0.85, 2))
+        if current < 1.0 and latency_ms < 60.0 and 0.0 < write_ms < 8.0:
+            return min(1.0, round(current * 1.08, 2))
+        return current
+
+    def _estimated_latency_ms(self, snapshot_latency_ms: float) -> float:
+        latency_ms = snapshot_latency_ms
+        if self._latency_probe_ns is not None:
+            latency_ms = max(
+                latency_ms,
+                max(0.0, (time.monotonic_ns() - self._latency_probe_ns) / 1e6),
+            )
+        return latency_ms
+
+    def _set_render_scale(self, value: float) -> None:
+        self._render_scale = value
+        render_scale = getattr(self.renderer, "render_scale", None)
+        if render_scale is not None:
+            self.renderer.render_scale = value
+
+    def _maybe_adjust_render_scale(self, now: float) -> bool:
+        if not self._auto_render_scale:
+            return False
+        snapshot = self.stats.snapshot()
+        next_scale = self._next_auto_render_scale(
+            self._render_scale,
+            latency_ms=self._estimated_latency_ms(snapshot.latency_ms),
+            write_ms=snapshot.write_ms,
+        )
+        if next_scale == self._render_scale:
+            return False
+        cooldown = 2.0 if next_scale < self._render_scale else 8.0
+        if now - self._last_scale_adjust < cooldown:
+            return False
+        self._last_scale_adjust = now
+        self._set_render_scale(next_scale)
+        return True
+
     def _refresh_rate(self, now: float, activity: float) -> float:
         idle = now - activity
         if idle < 1.0:
-            return self._active_fps
-        if idle < 5.0:
-            return min(self._active_fps, 30.0)
-        return min(self._active_fps, 2.0)
+            rate = self._active_fps
+        elif idle < 5.0:
+            rate = min(self._active_fps, 30.0)
+        else:
+            rate = min(self._active_fps, 2.0)
+        snapshot = self.stats.snapshot()
+        latency_ms = self._estimated_latency_ms(snapshot.latency_ms)
+        return self._limit_for_terminal_backpressure(
+            rate,
+            latency_ms=latency_ms,
+            write_ms=snapshot.write_ms,
+        )
+
+    @staticmethod
+    def _limit_for_terminal_backpressure(
+        refresh_rate: float,
+        *,
+        latency_ms: float,
+        write_ms: float,
+    ) -> float:
+        rate = max(1.0, refresh_rate)
+        if latency_ms >= 500.0:
+            rate = min(rate, 10.0)
+        elif latency_ms >= 250.0:
+            rate = min(rate, 15.0)
+        elif latency_ms >= 100.0:
+            rate = min(rate, 30.0)
+        if write_ms > 0.0:
+            # SSH can accept bytes faster than the client terminal can decode
+            # them, so write time is a conservative overload signal.
+            rate = min(rate, 1000.0 / max(1.0, write_ms * 2.0))
+        return max(1.0, rate)
 
     @staticmethod
     def _can_reuse_rendered_frame(
@@ -297,6 +401,13 @@ class DirectSession:
             self.stats.bytes_sent += len(output)
         return len(output)
 
+    def _reset_canvas(self, output_fd: int) -> None:
+        reset = b"\x1b[2J\x1b[H"
+        if isinstance(self.writer, KittyWriter):
+            reset = self.writer.reset_canvas()
+        TerminalState.write_all(output_fd, reset)
+        self.stats.bytes_sent += len(reset)
+
     def run(self) -> int:
         previous: RenderedFrame | KittyRenderedFrame | None = None
         last_change = time.monotonic()
@@ -386,13 +497,22 @@ class DirectSession:
                         last_content_digest = None
                         with self._current_lock:
                             self.current = None
-                        reset = b"\x1b[2J\x1b[H"
-                        if isinstance(self.writer, KittyWriter):
-                            reset = self.writer.reset_canvas()
-                        TerminalState.write_all(terminal.output_fd, reset)
+                        self._reset_canvas(terminal.output_fd)
                         next_frame = 0.0
 
                     now = time.monotonic()
+                    if self._maybe_adjust_render_scale(now):
+                        self._frame_pump.set_target_size(
+                            *self.renderer.target_size(*desktop_dimensions, *dimensions)
+                        )
+                        previous = None
+                        last_content_digest = None
+                        with self._current_lock:
+                            self.current = None
+                        self._reset_canvas(terminal.output_fd)
+                        next_frame = 0.0
+                        continue
+
                     refresh_rate = self._refresh_rate(
                         now, max(self._last_activity, last_change)
                     )

@@ -4,6 +4,11 @@ SSHDESK delegates authentication, encryption, host verification, PTY setup, and
 connection management to OpenSSH. It adds no credentials and opens no listening
 socket.
 
+## Reporting security issues
+
+If you notice a security issue, do not open a public issue. Email
+[rylen.anil@gmaail.com](mailto:rylen.anil@gmaail.com) with the details.
+
 ## Process privileges
 
 Run `sshdesk-server` as the graphical desktop user, never as root. X11 capture
@@ -39,17 +44,24 @@ sudoers file. It preserves only fixed display/render environment keys and permit
 the argument-free `sshdesk-server` plus the constrained
 `sshdesk-agent-ssh` dispatcher as the desktop owner. It never grants a root
 command. The dispatcher path lives in a root-owned installation directory.
+Shell-selector sessions always run as the authenticated SSH login and never use
+this sudo rule or the configured `RUN_AS` desktop owner.
 
 ## OpenSSH boundary
 
 The included configuration forces SSHDESK and disables forwarding, agent
 forwarding, tunnels, and user rc files for the matched account. Interactive
-desktop connections require a PTY. Non-interactive connections are accepted
-only when `SSH_ORIGINAL_COMMAND` begins with the exact `sshdesk-agent` program;
-its arguments are parsed into a fixed command grammar and never passed to a
-shell. Every other command is rejected. Keep the global OpenSSH
-`PermitUserEnvironment no` default; that directive is not portable inside a
-`Match` block.
+desktop connections require a PTY. The exact remote command argument `shell`
+(or `sshdesk-shell`) opens the authenticated account's interactive login shell.
+The exact `desktop`, `sshdesk`, or `sshdesk-server` argument selects the desktop
+path. Anyone who can authenticate to the account can request the shell and is
+therefore not confined to the desktop or agent command grammar.
+
+Non-interactive connections are accepted only when `SSH_ORIGINAL_COMMAND`
+begins with the exact `sshdesk-agent` program; its arguments are parsed into a
+fixed command grammar and never passed to a shell. Every other original command
+is rejected. Keep the global OpenSSH `PermitUserEnvironment no` default; that
+directive is not portable inside a `Match` block.
 
 Configure public-key, password, multifactor, source-address, and rate-limit
 policy in OpenSSH as usual. Test authentication before applying `ForceCommand`,
@@ -62,7 +74,8 @@ pending escape sequence at 8192 bytes. Terminal dimensions, key actions, mouse
 buttons, scroll amounts, and translated desktop coordinates are checked or
 bounded before injection. Agent lines, screenshots, text, coordinates, wait
 times, button counts, and response sizes are bounded. Terminal bytes and agent
-fields are never interpreted as shell commands.
+fields are never interpreted as shell commands by SSHDESK. Input entered after
+selecting the normal login shell is interpreted by that shell as expected.
 
 Captured pixels are converted either to numeric ANSI colors or base64-encoded,
 palette-compressed PNG image payloads. Desktop bytes and text are never copied into

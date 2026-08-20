@@ -9,12 +9,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "scripts" / "install.sh"
 WINDOWS_INSTALLER = ROOT / "scripts" / "install.ps1"
+FORCED_COMMAND = ROOT / "scripts" / "sshdesk-forced-command"
+CONFIGURE_SSHD = ROOT / "scripts" / "configure-sshd.sh"
 
 
 @unittest.skipUnless(os.name == "posix" and shutil.which("sh"), "POSIX shell test")
 class InstallerTests(unittest.TestCase):
     def test_bootstrap_has_valid_shell_syntax_and_help(self) -> None:
         subprocess.run(["sh", "-n", INSTALLER], check=True)
+        subprocess.run(["sh", "-n", FORCED_COMMAND], check=True)
+        subprocess.run(["sh", "-n", CONFIGURE_SSHD], check=True)
         result = subprocess.run(
             ["sh", INSTALLER, "--help"],
             check=True,
@@ -23,6 +27,19 @@ class InstallerTests(unittest.TestCase):
         )
         self.assertIn("--tailscale | --no-tailscale", result.stdout)
         self.assertIn('Linux|Darwin)', INSTALLER.read_text())
+
+    def test_posix_forced_command_accepts_shell_selector(self) -> None:
+        environment = os.environ.copy()
+        environment["SSH_ORIGINAL_COMMAND"] = "shell"
+        result = subprocess.run(
+            ["sh", FORCED_COMMAND],
+            capture_output=True,
+            check=False,
+            env=environment,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("requires an interactive terminal", result.stderr)
 
     def test_tailscale_is_official_optional_and_last(self) -> None:
         source = INSTALLER.read_text()

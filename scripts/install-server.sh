@@ -90,6 +90,7 @@ umask 077
     printf 'SSHDESK_UNICODE=auto\n'
     printf 'SSHDESK_X11_CAPTURE=auto\n'
     printf 'SSHDESK_MAX_FPS=auto\n'
+    printf 'SSHDESK_SCALE=auto\n'
 } > "${config}"
 chown root:root "${config}"
 chmod 0644 "${config}"
@@ -97,7 +98,7 @@ chmod 0644 "${config}"
 sudoers="/etc/sudoers.d/sshdesk-${account}"
 if [ "${run_as}" != "${account}" ]; then
     {
-        printf 'Defaults:%s env_keep += "DISPLAY XAUTHORITY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS YDOTOOL_SOCKET SSHDESK_RENDER SSHDESK_COLOR SSHDESK_MOUSE SSHDESK_UNICODE SSHDESK_X11_CAPTURE SSHDESK_MAX_FPS TERM"\n' "${account}"
+        printf 'Defaults:%s env_keep += "DISPLAY XAUTHORITY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS YDOTOOL_SOCKET SSHDESK_RENDER SSHDESK_COLOR SSHDESK_MOUSE SSHDESK_UNICODE SSHDESK_X11_CAPTURE SSHDESK_MAX_FPS SSHDESK_SCALE TERM"\n' "${account}"
         printf '%s ALL=(%s) NOPASSWD: /usr/local/bin/sshdesk-server ""\n' "${account}" "${run_as}"
         printf '%s ALL=(%s) NOPASSWD: /usr/local/bin/sshdesk-agent-ssh *\n' "${account}" "${run_as}"
     } > "${sudoers}"

@@ -5,6 +5,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
+from PIL import Image
+
 from sshdesk.capture.gnome import GnomeScreenCastCapture
 from sshdesk.capture.wayland import WaylandCapture
 
@@ -20,6 +22,33 @@ class WaylandCaptureTests(unittest.TestCase):
             "gnome-screenshot Wayland capture timed out after 5 seconds",
         ):
             WaylandCapture._run(command)
+
+
+class X11CaptureTests(unittest.TestCase):
+    def test_pillow_fallback_prescales_and_fingerprints_frame(self) -> None:
+        try:
+            from sshdesk.capture.x11 import X11Capture
+        except ImportError as exc:
+            self.skipTest(f"python-xlib unavailable: {exc}")
+
+        capture = object.__new__(X11Capture)
+        capture._lock = threading.RLock()
+        capture._ffmpeg_disabled = True
+        capture._shared_disabled = True
+        capture._target_size = (20, 10)
+        capture._desktop_size = (100, 50)
+        capture.display_name = ":0"
+        capture._refresh_geometry = lambda: None
+
+        with patch(
+            "sshdesk.capture.x11.ImageGrab.grab",
+            return_value=Image.new("RGB", (100, 50), (12, 34, 56)),
+        ):
+            frame = capture.capture()
+
+        self.assertEqual(frame.image.size, (20, 10))
+        self.assertEqual((frame.width, frame.height), (100, 50))
+        self.assertIsNotNone(frame.content_digest)
 
 
 class GnomeCaptureTests(unittest.TestCase):

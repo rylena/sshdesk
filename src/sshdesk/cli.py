@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import shutil
 import sys
+from pathlib import Path
 
 from sshdesk.platform import create_capture
 from sshdesk.render import TerminalRenderer, TerminalWriter
@@ -50,14 +52,70 @@ def server_main() -> int:
     return server_entrypoint()
 
 
+def _split_ssh_command(command: str) -> list[str] | None:
+    try:
+        return shlex.split(command, posix=os.name != "nt")
+    except ValueError:
+        return None
+
+
+def _login_shell() -> str:
+    configured = os.environ.get("COMSPEC", "cmd.exe") if os.name == "nt" else ""
+    if os.name != "nt":
+        try:
+            import pwd
+
+            configured = pwd.getpwuid(os.getuid()).pw_shell
+        except (ImportError, KeyError):
+            configured = ""
+        configured = configured or os.environ.get("SHELL", "/bin/sh")
+    shell = shutil.which(configured)
+    if not shell:
+        raise OSError(f"login shell is unavailable: {configured}")
+    return shell
+
+
+def _exec_shell() -> int:
+    shell = _login_shell()
+    arguments = [shell] if os.name == "nt" else [shell, "-l"]
+    os.execv(shell, arguments)
+    return 0
+
+
+def _has_interactive_terminal() -> bool:
+    return os.isatty(sys.stdin.fileno()) and os.isatty(sys.stdout.fileno())
+
+
 def forced_command_main() -> int:
-    """Dispatch the portable OpenSSH forced command without evaluating shell input."""
+    """Dispatch the portable OpenSSH forced command."""
     original_command = os.environ.get("SSH_ORIGINAL_COMMAND", "")
     if original_command:
+        command = _split_ssh_command(original_command)
+        program = Path(command[0]).name if command else ""
         from sshdesk.agent import agent_ssh_entrypoint
 
+        if program == "sshdesk-agent":
+            return agent_ssh_entrypoint([original_command])
+        if command and len(command) == 1 and command[0] in {
+            "desktop",
+            "sshdesk",
+            "sshdesk-server",
+        }:
+            if not _has_interactive_terminal():
+                print("SSHDESK requires an interactive SSH terminal (PTY).", file=sys.stderr)
+                return 1
+            return server_main()
+        if command and len(command) == 1 and command[0] in {"shell", "sshdesk-shell"}:
+            if not _has_interactive_terminal():
+                print("The SSH shell selector requires an interactive terminal (PTY).", file=sys.stderr)
+                return 1
+            try:
+                return _exec_shell()
+            except OSError as exc:
+                print(f"sshdesk-shell: {exc}", file=sys.stderr)
+                return 1
         return agent_ssh_entrypoint([original_command])
-    if not os.isatty(sys.stdin.fileno()) or not os.isatty(sys.stdout.fileno()):
+    if not _has_interactive_terminal():
         print("SSHDESK requires an interactive SSH terminal (PTY).", file=sys.stderr)
         return 1
     return server_main()

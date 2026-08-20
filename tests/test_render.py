@@ -178,6 +178,15 @@ class RenderTests(unittest.TestCase):
         self.assertGreater(len(update.changes), 0)
         self.assertLess(len(update.changes), len(second.tiles))
 
+    def test_kitty_renderer_uses_client_fps_friendly_tile_count(self) -> None:
+        renderer = KittyRenderer(self.graphics_probe())
+        rendered = renderer.render(
+            SyntheticCapture(1920, 1080, animate=False).capture(),
+            120,
+            40,
+        )
+        self.assertLessEqual(len(rendered.tiles), 48)
+
     def test_renderer_accepts_prescaled_frame_with_desktop_coordinates(self) -> None:
         renderer = KittyRenderer(self.graphics_probe())
         target = renderer.target_size(1920, 1080, 80, 24)
@@ -194,6 +203,36 @@ class RenderTests(unittest.TestCase):
             (1920, 1080),
         )
         self.assertEqual(rendered.image.getpixel((0, 0)), (12, 34, 56))
+
+    def test_render_scale_reduces_capture_targets_without_changing_desktop_mapping(
+        self,
+    ) -> None:
+        full_terminal = TerminalRenderer(top_margin=1)
+        smooth_terminal = TerminalRenderer(top_margin=1, render_scale=0.5)
+        full_target = full_terminal.target_size(1920, 1080, 120, 40)
+        smooth_target = smooth_terminal.target_size(1920, 1080, 120, 40)
+        self.assertLess(smooth_target[0] * smooth_target[1], full_target[0] * full_target[1])
+        rendered_terminal = smooth_terminal.render(
+            Frame(Image.new("RGB", smooth_target), 1, 1920, 1080),
+            120,
+            40,
+        )
+        self.assertEqual(rendered_terminal.viewport.desktop_width, 1920)
+        self.assertEqual(rendered_terminal.viewport.desktop_height, 1080)
+        self.assertGreater(rendered_terminal.viewport.x, 0)
+
+        full_kitty = KittyRenderer(self.graphics_probe())
+        smooth_kitty = KittyRenderer(self.graphics_probe(), render_scale=0.5)
+        full_pixels = full_kitty.target_size(1920, 1080, 120, 40)
+        smooth_pixels = smooth_kitty.target_size(1920, 1080, 120, 40)
+        self.assertLess(smooth_pixels[0] * smooth_pixels[1], full_pixels[0] * full_pixels[1])
+        rendered_kitty = smooth_kitty.render(
+            Frame(Image.new("RGB", smooth_pixels), 1, 1920, 1080),
+            120,
+            40,
+        )
+        self.assertEqual(rendered_kitty.pixel_viewport.desktop_width, 1920)
+        self.assertEqual(rendered_kitty.pixel_viewport.desktop_height, 1080)
 
     def test_kitty_renderer_never_upscales_the_remote_desktop(self) -> None:
         renderer = KittyRenderer(self.graphics_probe())

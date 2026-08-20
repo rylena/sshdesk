@@ -77,6 +77,41 @@ class AgentTests(unittest.TestCase):
         with patch.dict("os.environ", {"SSH_ORIGINAL_COMMAND": "id"}, clear=True):
             self.assertEqual(forced_command_main(), 126)
 
+    def test_portable_forced_command_opens_shell_selector(self) -> None:
+        environment = {"SSH_ORIGINAL_COMMAND": "shell"}
+        with patch.dict("os.environ", environment, clear=True), patch(
+            "sshdesk.cli._has_interactive_terminal", return_value=True
+        ), patch("sshdesk.cli._login_shell", return_value="/bin/bash"), patch(
+            "sshdesk.cli.os.execv"
+        ) as execv:
+            self.assertEqual(forced_command_main(), 0)
+        execv.assert_called_once_with("/bin/bash", ["/bin/bash", "-l"])
+
+    def test_portable_forced_command_requires_pty_for_shell_selector(self) -> None:
+        environment = {"SSH_ORIGINAL_COMMAND": "shell"}
+        with patch.dict("os.environ", environment, clear=True), patch(
+            "sshdesk.cli._has_interactive_terminal", return_value=False
+        ), patch("sshdesk.cli.os.execv") as execv:
+            self.assertEqual(forced_command_main(), 1)
+        execv.assert_not_called()
+
+    def test_portable_forced_command_keeps_agent_commands_restricted(self) -> None:
+        environment = {"SSH_ORIGINAL_COMMAND": "sshdesk-agent info; id"}
+        with patch.dict("os.environ", environment, clear=True), patch(
+            "sshdesk.cli.os.execv"
+        ) as execv:
+            self.assertEqual(forced_command_main(), 2)
+        execv.assert_not_called()
+
+    def test_portable_forced_command_accepts_explicit_desktop_command(self) -> None:
+        with patch.dict(
+            "os.environ", {"SSH_ORIGINAL_COMMAND": "sshdesk"}, clear=True
+        ), patch("sshdesk.cli._has_interactive_terminal", return_value=True), patch(
+            "sshdesk.cli.server_main", return_value=0
+        ) as server:
+            self.assertEqual(forced_command_main(), 0)
+        server.assert_called_once_with()
+
     def test_actions_are_bounded(self) -> None:
         controller, _backend = self.controller()
         with self.assertRaisesRegex(ValueError, "coordinate"):

@@ -7,6 +7,8 @@ import unittest
 from PIL import Image
 
 from sshdesk.capture.base import Frame, ScreenCapture
+from sshdesk.input.base import NullInputBackend
+from sshdesk.render import ColorMode, TerminalCapabilities
 from sshdesk.session.direct import DirectSession
 from sshdesk.session.frame_pump import LatestFramePump
 
@@ -101,6 +103,76 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(DirectSession._parse_max_fps("90", sharp=True), 90.0)
         with self.assertRaisesRegex(RuntimeError, "between 1 and 120"):
             DirectSession._parse_max_fps("240", sharp=True)
+
+    def test_render_scale_accepts_smooth_lower_resolution_mode(self) -> None:
+        self.assertEqual(DirectSession._parse_render_scale("auto"), 1.0)
+        self.assertEqual(DirectSession._parse_render_scale(None), 1.0)
+        self.assertEqual(DirectSession._parse_render_scale("0.75"), 0.75)
+        with self.assertRaisesRegex(RuntimeError, "between 0.25 and 1.0"):
+            DirectSession._parse_render_scale("0.1")
+
+    def test_auto_render_scale_tracks_client_backpressure(self) -> None:
+        self.assertEqual(
+            DirectSession._next_auto_render_scale(
+                1.0,
+                latency_ms=260.0,
+                write_ms=5.0,
+            ),
+            0.75,
+        )
+        self.assertEqual(
+            DirectSession._next_auto_render_scale(
+                0.75,
+                latency_ms=40.0,
+                write_ms=4.0,
+            ),
+            0.81,
+        )
+        self.assertEqual(
+            DirectSession._next_auto_render_scale(
+                0.5,
+                latency_ms=500.0,
+                write_ms=50.0,
+            ),
+            0.5,
+        )
+
+    def test_terminal_backpressure_caps_refresh_rate(self) -> None:
+        self.assertEqual(
+            DirectSession._limit_for_terminal_backpressure(
+                60.0,
+                latency_ms=0.0,
+                write_ms=5.0,
+            ),
+            60.0,
+        )
+        self.assertEqual(
+            DirectSession._limit_for_terminal_backpressure(
+                60.0,
+                latency_ms=150.0,
+                write_ms=5.0,
+            ),
+            30.0,
+        )
+        self.assertEqual(
+            DirectSession._limit_for_terminal_backpressure(
+                60.0,
+                latency_ms=0.0,
+                write_ms=25.0,
+            ),
+            20.0,
+        )
+
+    def test_pending_latency_probe_caps_refresh_rate(self) -> None:
+        session = DirectSession(
+            _FastCapture(),
+            NullInputBackend(),
+            TerminalCapabilities("test", ColorMode.ANSI256, True, True, True),
+        )
+        session._active_fps = 60.0
+        session._latency_probe_ns = time.monotonic_ns() - 600_000_000
+        now = time.monotonic()
+        self.assertLessEqual(session._refresh_rate(now, now), 10.0)
 
     def test_identical_capture_digest_reuses_rendered_state(self) -> None:
         image = Image.new("RGB", (16, 9))

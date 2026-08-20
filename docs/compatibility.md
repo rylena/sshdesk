@@ -33,10 +33,19 @@ SSHDESK_MOUSE=auto
 SSHDESK_UNICODE=auto
 SSHDESK_X11_CAPTURE=auto
 SSHDESK_MAX_FPS=auto
+SSHDESK_SCALE=auto
 ```
 
 `SSHDESK_RENDER=kitty` makes missing graphics support an explicit error;
-`SSHDESK_RENDER=ansi` skips the image capability probe.
+`SSHDESK_RENDER=ansi` skips the image capability probe. `SSHDESK_SCALE=auto`
+can reduce detail dynamically when terminal writes or replies fall behind.
+Fixed values such as `0.75` or `0.5` trade image detail for less terminal
+graphics traffic on slower clients.
+
+`ssh -t user@host shell` opens the account's normal login shell. The `shell`
+selector is a remote command argument after the destination, not a local
+`--shell` option. It does not re-enable the forwarding features disabled by the
+generated OpenSSH configuration.
 
 Sharp graphics also work inside tmux when tmux supports `allow-passthrough`.
 `sshdesk-split` enables it automatically and wraps each Kitty APC for tmux.

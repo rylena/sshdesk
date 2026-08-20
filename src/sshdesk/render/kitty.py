@@ -21,8 +21,10 @@ FULL_IMAGE_IDS = (0x7500, 0x7501)
 IMAGE_ID_BASE = 0x7600
 CURSOR_IMAGE_ID = 0x47600
 PLACEMENT_ID = 1
-TILE_TARGET_PIXELS = 96
-FULL_REPLACE_THRESHOLD = 25.0
+# Fewer, larger placements generally produce better terminal-side FPS than many
+# tiny image updates. SSHDESK still uses tile deltas for small changes.
+TILE_TARGET_PIXELS = 160
+FULL_REPLACE_THRESHOLD = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,13 +101,21 @@ def translate_pixel_coordinates(
 class KittyRenderer:
     """Render the desktop as changed RGB tiles in terminal pixel space."""
 
-    def __init__(self, probe: GraphicsProbe, top_margin: int = 0) -> None:
+    def __init__(
+        self,
+        probe: GraphicsProbe,
+        top_margin: int = 0,
+        render_scale: float = 1.0,
+    ) -> None:
         if not probe.usable:
             raise ValueError("Kitty rendering requires graphics and terminal pixel geometry")
         if not 0 <= top_margin <= 16:
             raise ValueError("renderer top margin must be between 0 and 16")
+        if not 0.25 <= render_scale <= 1.0:
+            raise ValueError("renderer scale must be between 0.25 and 1.0")
         self.probe = probe
         self.top_margin = top_margin
+        self.render_scale = float(render_scale)
 
     def _layout(
         self,
@@ -133,6 +143,7 @@ class KittyRenderer:
             usable_width / desktop_width,
             usable_height / desktop_height,
         )
+        scale *= self.render_scale
         ideal_width = max(cell_width, desktop_width * scale)
         ideal_height = max(cell_height, desktop_height * scale)
         cell_columns = max(1, min(width, int(ideal_width // cell_width)))
@@ -189,8 +200,12 @@ class KittyRenderer:
                 (image_width, image_height), resampling.LANCZOS
             )
 
-        tile_columns = max(1, TILE_TARGET_PIXELS // cell_width)
-        tile_rows = max(1, TILE_TARGET_PIXELS // cell_height)
+        tile_target_pixels = min(
+            TILE_TARGET_PIXELS,
+            max(80, min(image_width, image_height) // 2),
+        )
+        tile_columns = max(1, tile_target_pixels // cell_width)
+        tile_rows = max(1, tile_target_pixels // cell_height)
         tiles: list[KittyTile] = []
         for tile_y, row in enumerate(range(0, cell_rows, tile_rows)):
             rows_here = min(tile_rows, cell_rows - row)
@@ -243,6 +258,8 @@ class KittyRenderer:
         previous: KittyRenderedFrame | None,
         current: KittyRenderedFrame,
     ) -> KittyFrameUpdate:
+        if previous is current:
+            return KittyFrameUpdate(UpdateKind.UNCHANGED, current)
         if (
             previous is None
             or previous.terminal_width != current.terminal_width

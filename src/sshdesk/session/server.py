@@ -71,6 +71,11 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
         help="active refresh limit (default: 60 sharp pixels, 30 ANSI; maximum 120)",
     )
     parser.add_argument(
+        "--scale",
+        type=float,
+        help="render scale from 0.25 to 1.0; lower values trade detail for smoother output",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="verify capture and input access without starting a terminal session",
@@ -103,6 +108,7 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
             input_backend,
             _capabilities(args),
             max_fps=args.max_fps,
+            render_scale=args.scale,
         )
         # Ownership transfers to the session, including failure cleanup.
         capture = None

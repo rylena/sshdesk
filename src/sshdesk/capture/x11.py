@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import threading
 import time
 
-from PIL import ImageGrab
+from PIL import Image, ImageGrab
 from Xlib import display
 
 from .base import Frame, ScreenCapture
@@ -132,7 +133,13 @@ class X11Capture(ScreenCapture):
             image = ImageGrab.grab(xdisplay=self.display_name)
             if image.mode != "RGB":
                 image = image.convert("RGB")
-            return Frame(image=image, captured_ns=time.monotonic_ns())
+            desktop_size = image.size
+            self._desktop_size = desktop_size
+            target = self._target_size
+            if target is not None and image.size != target:
+                image = image.resize(target, Image.Resampling.BICUBIC)
+            digest = hashlib.blake2s(image.tobytes(), digest_size=8).digest()
+            return Frame(image, time.monotonic_ns(), *desktop_size, digest)
 
     def size(self) -> tuple[int, int]:
         with self._lock:

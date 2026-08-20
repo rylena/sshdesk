@@ -13,6 +13,9 @@
 [![Tests](https://github.com/rylena/sshdesk/actions/workflows/test.yml/badge.svg)](https://github.com/rylena/sshdesk/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+AI coding agents must read [AGENTS.md](AGENTS.md) before modifying this
+repository.
+
 > SSHDESK is a full interactive remote desktop delivered entirely through an SSH session and displayed directly inside your terminal.
 
 ## Demo
@@ -22,7 +25,14 @@
 Connect with the SSH client you already have:
 
 ```bash
+# SSHDESK desktop (default)
 ssh desktop@example.com
+
+# Normal login shell
+ssh -t desktop@example.com shell
+
+# Explicitly select SSHDESK
+ssh -t desktop@example.com desktop
 ```
 
 OpenSSH authenticates the user and launches SSHDESK as a forced command. The
@@ -201,11 +211,47 @@ sudo sshd -t && sudo systemctl reload ssh
 The generated sudoers rule does not grant root. OpenSSH remains the only
 authentication system.
 
+### Normal SSH shell access
+
+Pass `shell` as the remote command argument after the SSH destination:
+
+```bash
+ssh -t user@server shell
+```
+
+Plain `ssh user@server` continues to open the desktop. The explicit equivalent
+is `ssh -t user@server desktop`. OpenSSH does not accept `--shell` as a local
+option; `shell` must appear after `user@server` so it is sent to the forced
+command dispatcher.
+
+The shell runs as the authenticated SSH account, never as a different `RUN_AS`
+desktop owner. Existing forwarding restrictions remain in effect. Anyone who
+can authenticate to this account can request the shell selector and receives
+the same command access as an ordinary shell login.
+
+An SSH client alias can make the shell connection look like a normal host:
+
+```sshconfig
+Host server-shell
+    HostName server
+    User user
+    RequestTTY force
+    RemoteCommand shell
+```
+
+Then run `ssh server-shell` for the shell and `ssh user@server` for SSHDESK.
+
 ## Agent computer use and side-by-side work
 
 The forced-command account accepts a small fixed `sshdesk-agent` command set in
 addition to the interactive desktop. It never evaluates a received shell
-string. Examples:
+string. Any AI agent that can run CLI commands and use SSH can connect; SSHDESK
+does not require a particular agent framework or model. Normal shell access and
+scripted actions at known coordinates do not require vision. To navigate an
+unfamiliar graphical desktop dynamically, the agent needs vision or a separate
+PNG analysis/OCR tool because observations contain screenshots rather than a
+semantic accessibility tree. The remote host must have SSHDESK configured, and
+the agent must have valid SSH credentials and network access. Examples:
 
 ```bash
 ssh user@server sshdesk-agent info
@@ -268,11 +314,15 @@ SSHDESK_MOUSE=auto
 SSHDESK_UNICODE=auto
 SSHDESK_X11_CAPTURE=auto
 SSHDESK_MAX_FPS=auto
+SSHDESK_SCALE=auto
 ```
 
 `SSHDESK_RENDER=kitty` requires sharp graphics; `ansi` forces the universal
 fallback. `SSHDESK_X11_CAPTURE=auto` tries continuously drained FFmpeg/XCB,
 then MIT-SHM, then Pillow/XCB. `SSHDESK_MAX_FPS` accepts 1–120.
+`SSHDESK_SCALE=auto` dynamically reduces detail when the client terminal falls
+behind. Fixed values from 0.25–1.0, such as 0.75, send fewer pixels all the time
+for smoother sessions on slower clients or networks.
 
 ## macOS and Windows host details
 
