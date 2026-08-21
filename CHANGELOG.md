@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- capture macOS desktops with Quartz `CGDisplayCreateImage` instead of Pillow's
+  `screencapture` helper, which fails over SSH
+- keep macOS mouse coordinates in `CGDisplayPixelsWide`/`High` space
+- restore Accessibility checks on PyObjC 12, where `Quartz.AXIsProcessTrusted`
+  is no longer exported
+
 ## 0.4.5
 
 - adapt display FPS under terminal RTT/write backpressure so slow clients stop accumulating visual lag
