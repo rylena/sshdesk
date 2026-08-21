@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from sshdesk.input.events import (
     ControlEvent,
@@ -14,11 +15,40 @@ from sshdesk.input.events import (
     MouseScrollEvent,
     TerminalReportEvent,
 )
+from sshdesk.input.macos import process_is_trusted
 from sshdesk.input.mutter import MutterInput
 from sshdesk.input.terminal import TerminalEventParser, translate_coordinates
 from sshdesk.render.base import Viewport
 from sshdesk.render.kitty import PixelViewport, translate_pixel_coordinates
 from sshdesk.session.direct import DirectSession
+
+
+class MacOSTrustTests(unittest.TestCase):
+    def test_process_is_trusted_uses_quartz_when_exported(self) -> None:
+        self.assertTrue(process_is_trusted(SimpleNamespace(AXIsProcessTrusted=lambda: True)))
+        self.assertFalse(process_is_trusted(SimpleNamespace(AXIsProcessTrusted=lambda: False)))
+
+    def test_process_is_trusted_falls_back_to_application_services(self) -> None:
+        class FakeLibrary:
+            def __init__(self) -> None:
+                self.AXIsProcessTrusted = lambda: True
+                self.AXIsProcessTrusted.restype = None
+
+        loaded: list[str] = []
+
+        def load_library(path: str) -> FakeLibrary:
+            loaded.append(path)
+            return FakeLibrary()
+
+        with patch("sshdesk.input.macos.ctypes.util.find_library", return_value="/AS"), patch(
+            "sshdesk.input.macos.ctypes.cdll.LoadLibrary", side_effect=load_library
+        ):
+            self.assertTrue(process_is_trusted(SimpleNamespace()))
+        self.assertEqual(loaded, ["/AS"])
+
+    def test_process_is_trusted_is_false_without_application_services(self) -> None:
+        with patch("sshdesk.input.macos.ctypes.util.find_library", return_value=None):
+            self.assertFalse(process_is_trusted(SimpleNamespace()))
 
 
 class InputTests(unittest.TestCase):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 from typing import Any
 
 from .base import InputBackend
@@ -34,6 +36,18 @@ MAC_KEYCODES = {
 }
 
 
+def process_is_trusted(quartz: Any) -> bool:
+    checker = getattr(quartz, "AXIsProcessTrusted", None)
+    if callable(checker):
+        return bool(checker())
+    path = ctypes.util.find_library("ApplicationServices")
+    if not path:
+        return False
+    library = ctypes.cdll.LoadLibrary(path)
+    library.AXIsProcessTrusted.restype = ctypes.c_bool
+    return bool(library.AXIsProcessTrusted())
+
+
 class MacOSInput(InputBackend):
     """macOS Quartz input injection with Accessibility permission checks."""
 
@@ -45,7 +59,7 @@ class MacOSInput(InputBackend):
                 "macOS input needs the macOS extra: pip install 'sshdesk[macos]'"
             ) from exc
         self.q: Any = Quartz
-        if not Quartz.AXIsProcessTrusted():
+        if not process_is_trusted(Quartz):
             raise RuntimeError(
                 "grant Accessibility permission to the SSH/Python process for input control"
             )

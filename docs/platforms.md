@@ -51,10 +51,16 @@ provide none of the listed capture interfaces need a backend adapter.
 
 ## macOS host
 
-`NativeCapture` uses Pillow's CoreGraphics path and `MacOSInput` uses Quartz.
-Grant Screen Recording and Accessibility permission to the installed Python
-binary. A manually launched server in the logged-in Aqua session is supported;
-OpenSSH daemon access depends on macOS TCC/session policy.
+`NativeCapture` uses Quartz `CGDisplayCreateImage` and `MacOSInput` uses Quartz
+event injection. Pillow's macOS `ImageGrab` path shells out to `screencapture`,
+which fails from OpenSSH (`could not create image from display`) even when the
+Python process already has Screen Recording permission. Quartz capture stays in
+that process, so SSH sessions work after TCC is granted. Newer PyObjC builds no
+longer export `AXIsProcessTrusted` on the `Quartz` module; input falls back to
+the ApplicationServices C API. Grant Screen Recording and Accessibility
+permission to the installed Python binary. A manually launched server in the
+logged-in Aqua session is supported; OpenSSH daemon access still depends on
+macOS TCC/session policy.
 
 ## Windows host
 
