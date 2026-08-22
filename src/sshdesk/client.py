@@ -14,6 +14,7 @@ from sshdesk.agent import BUTTONS, KEY_NAMES
 
 TARGET_RE = re.compile(r"^[A-Za-z0-9_.%+@:-]{1,255}$")
 MAX_REMOTE_RESPONSE = 64 * 1024 * 1024
+DEFAULT_REQUEST_TIMEOUT = 30.0
 
 
 def _split_arguments(target: str, direction: str, size: int, pane: str) -> list[str]:
@@ -74,7 +75,11 @@ def split_entrypoint(argv: list[str] | None = None) -> int:
         raise
 
 
-def _remote_request(target: str, request: dict[str, object]) -> dict[str, object]:
+def _remote_request(
+    target: str,
+    request: dict[str, object],
+    timeout: float = DEFAULT_REQUEST_TIMEOUT,
+) -> dict[str, object]:
     ssh = shutil.which("ssh")
     if ssh is None:
         raise RuntimeError("OpenSSH ssh is required")
@@ -84,7 +89,7 @@ def _remote_request(target: str, request: dict[str, object]) -> dict[str, object
         input=payload,
         capture_output=True,
         check=False,
-        timeout=30,
+        timeout=timeout,
     )
     if process.returncode != 0:
         detail = process.stderr.decode(errors="replace").strip()
@@ -108,6 +113,12 @@ def remote_entrypoint(argv: list[str] | None = None) -> int:
         description="Observe or control an SSHDESK host through ordinary OpenSSH",
     )
     parser.add_argument("target", help="OpenSSH target, for example user@host")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_REQUEST_TIMEOUT,
+        help="seconds to wait for a one-shot agent response (default: 30)",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("info")
     screenshot = commands.add_parser("screenshot", aliases=["observe"])
@@ -137,6 +148,8 @@ def remote_entrypoint(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not TARGET_RE.fullmatch(args.target):
         parser.error("target contains unsupported characters")
+    if not 0 < args.timeout:
+        parser.error("--timeout must be a positive number of seconds")
     if args.command == "session":
         ssh = shutil.which("ssh")
         if ssh is None:
@@ -162,7 +175,7 @@ def remote_entrypoint(argv: list[str] | None = None) -> int:
         request.update(key=args.key, ctrl=args.ctrl, alt=args.alt, shift=args.shift)
 
     try:
-        response = _remote_request(args.target, request)
+        response = _remote_request(args.target, request, timeout=args.timeout)
         if args.command == "info":
             response.pop("id", None)
             response.pop("ok", None)
@@ -175,6 +188,10 @@ def remote_entrypoint(argv: list[str] | None = None) -> int:
             else:
                 Path(args.output).write_bytes(image)
         return 0
+    except subprocess.TimeoutExpired as exc:
+        limit = exc.timeout if exc.timeout is not None else args.timeout
+        print(f"sshdesk-remote: timed out after {limit:g} seconds", file=sys.stderr)
+        return 1
     except (KeyError, OSError, RuntimeError, ValueError) as exc:
         print(f"sshdesk-remote: {exc}", file=sys.stderr)
         return 1

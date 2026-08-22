@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+import threading
 import time
+from collections import deque
 from pathlib import Path
+from typing import BinaryIO
 
 from PIL import Image
+
+_STDERR_CHUNK = 256
+_STDERR_CHUNKS_KEPT = 8
 
 
 class FFmpegX11Capture:
@@ -26,6 +32,8 @@ class FFmpegX11Capture:
         self.frames_per_second = 60.0
         self._process: subprocess.Popen[bytes] | None = None
         self._buffer = bytearray()
+        self._stderr_chunks: deque[bytes] = deque(maxlen=_STDERR_CHUNKS_KEPT)
+        self._stderr_thread: threading.Thread | None = None
 
     def set_target_size(self, width: int, height: int) -> None:
         target = width, height
@@ -80,7 +88,25 @@ class FFmpegX11Capture:
             bufsize=0,
             close_fds=True,
         )
+        self._stderr_chunks.clear()
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr, args=(self._process.stderr,), daemon=True
+        )
+        self._stderr_thread.start()
         self._buffer = bytearray(width * height * 3)
+
+    def _drain_stderr(self, stream: BinaryIO | None) -> None:
+        """Keep the pipe drained so a chatty ffmpeg cannot block on stderr writes."""
+        if stream is None:
+            return
+        try:
+            for chunk in iter(lambda: stream.read(_STDERR_CHUNK), b""):
+                self._stderr_chunks.append(chunk)
+        except (OSError, ValueError):
+            pass
+
+    def _stderr_detail(self) -> str:
+        return b"".join(self._stderr_chunks)[:2048].decode(errors="replace").strip()
 
     def capture(self) -> tuple[Image.Image, int, bytes]:
         self._start()
@@ -92,9 +118,7 @@ class FFmpegX11Capture:
         while offset < len(view):
             count = process.stdout.readinto(view[offset:])
             if not count:
-                detail = ""
-                if process.stderr is not None:
-                    detail = process.stderr.read(2048).decode(errors="replace").strip()
+                detail = self._stderr_detail()
                 self._stop()
                 suffix = f": {detail}" if detail else ""
                 raise OSError(f"FFmpeg X11 capture stream ended{suffix}")
@@ -119,7 +143,13 @@ class FFmpegX11Capture:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=1.0)
-        if process.stderr is not None:
+        thread = self._stderr_thread
+        self._stderr_thread = None
+        if thread is not None:
+            # Process exit closes the stderr read end, so the drain loop ends on its own.
+            thread.join(timeout=1.0)
+        if process.stderr is not None and (thread is None or not thread.is_alive()):
+            # Never close under a live reader thread.
             process.stderr.close()
 
     def close(self) -> None:

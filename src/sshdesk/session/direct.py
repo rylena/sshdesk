@@ -616,6 +616,9 @@ class DirectSession:
         except (OSError, RuntimeError, ValueError) as exc:
             print(f"sshdesk-server: {exc}", file=sys.stderr)
             return 1
+        except KeyboardInterrupt:
+            # Cleanup still runs via the finally block; 130 mirrors shell SIGINT convention.
+            return 130
         finally:
             self.stop_event.set()
             self._wake_event.set()

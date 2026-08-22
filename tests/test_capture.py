@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import io
 import subprocess
 import threading
 import unittest
+from collections import deque
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from PIL import Image
 
+from sshdesk.capture.ffmpeg import FFmpegX11Capture
 from sshdesk.capture.gnome import GnomeScreenCastCapture
 from sshdesk.capture.native import NativeCapture, grab_macos_display
 from sshdesk.capture.wayland import WaylandCapture
@@ -186,6 +190,60 @@ class GnomeCaptureTests(unittest.TestCase):
                 (capture.REMOTE_NAME, "/remote/session", "Stop"),
             ],
         )
+
+
+class FFmpegCaptureTests(unittest.TestCase):
+    def _capture(self) -> FFmpegX11Capture:
+        capture = object.__new__(FFmpegX11Capture)
+        capture._stderr_chunks = deque(maxlen=8)
+        capture._stderr_thread = None
+        return capture
+
+    def test_stderr_drain_keeps_tail_and_survives_closed_stream(self) -> None:
+        capture = self._capture()
+        stream = io.BytesIO(b"x" * 4096 + b"frame dropped")
+        capture._stderr_chunks.clear()
+        capture._drain_stderr(stream)
+        detail = capture._stderr_detail()
+        self.assertTrue(detail.endswith("frame dropped"))
+        self.assertLessEqual(len(detail), 2048)
+
+    def test_stderr_drain_ignores_read_errors(self) -> None:
+        class BrokenStream:
+            def read(self, _size: int) -> bytes:
+                raise OSError("closed")
+
+        capture = self._capture()
+        capture._stderr_chunks.clear()
+        capture._drain_stderr(BrokenStream())
+        self.assertEqual(capture._stderr_detail(), "")
+        capture._drain_stderr(None)
+
+    def test_capture_reports_drained_stderr_after_stream_ends(self) -> None:
+        capture = self._capture()
+        capture._buffer = bytearray(10)
+        capture._stderr_chunks.clear()
+        capture._stderr_chunks.append(b"capturer error")
+        capture._process = SimpleNamespace(
+            stdout=io.BytesIO(b""),
+            stderr=None,
+            poll=lambda: 1,
+            terminate=lambda: None,
+        )
+
+        with self.assertRaisesRegex(OSError, "stream ended: capturer error"):
+            capture.capture()
+        self.assertIsNone(capture._process)
+
+    def test_set_frame_rate_bounds_are_enforced(self) -> None:
+        capture = self._capture()
+        capture.frames_per_second = 60.0
+        capture.target_size = (64, 64)
+        capture._stop = lambda: None
+        capture.set_frame_rate(30.0)
+        self.assertEqual(capture.frames_per_second, 30.0)
+        with self.assertRaisesRegex(ValueError, "between 0.5 and 120"):
+            capture.set_frame_rate(500.0)
 
 
 if __name__ == "__main__":

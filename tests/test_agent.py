@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import io
+import os
+import subprocess
 import unittest
+from contextlib import redirect_stderr
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,8 +14,12 @@ from sshdesk.agent import (
     agent_ssh_entrypoint,
 )
 from sshdesk.capture.synthetic import SyntheticCapture
-from sshdesk.cli import forced_command_main
-from sshdesk.client import _remote_request, _split_arguments
+from sshdesk.cli import _shell_arguments, forced_command_main
+from sshdesk.client import (
+    _remote_request,
+    _split_arguments,
+    remote_entrypoint,
+)
 from sshdesk.input.base import InputBackend
 from sshdesk.input.events import KeyCode, KeyEvent, Modifiers
 from sshdesk.input.ydotool import YdotoolInput
@@ -85,7 +93,29 @@ class AgentTests(unittest.TestCase):
             "sshdesk.cli.os.execv"
         ) as execv:
             self.assertEqual(forced_command_main(), 0)
-        execv.assert_called_once_with("/bin/bash", ["/bin/bash", "-l"])
+        arguments = ["/bin/bash"] if os.name == "nt" else ["/bin/bash", "-l"]
+        execv.assert_called_once_with("/bin/bash", arguments)
+
+    def test_login_shell_arguments_match_each_platform(self) -> None:
+        # Regression test for the Windows portable job: cmd.exe rejects -l.
+        with patch("sshdesk.cli.os.name", "posix"):
+            self.assertEqual(_shell_arguments("/bin/bash"), ["/bin/bash", "-l"])
+        with patch("sshdesk.cli.os.name", "nt"):
+            self.assertEqual(_shell_arguments("/bin/bash"), ["/bin/bash"])
+            self.assertEqual(_shell_arguments("cmd.exe"), ["cmd.exe"])
+
+    def test_windows_shell_selector_execs_without_login_flag(self) -> None:
+        environment = {"SSH_ORIGINAL_COMMAND": "shell"}
+        shell = "C:/Windows/system32/cmd.exe"
+        with patch.dict("os.environ", environment, clear=True), patch(
+            "sshdesk.cli.os.name", "nt"
+        ), patch(
+            "sshdesk.cli._has_interactive_terminal", return_value=True
+        ), patch(
+            "sshdesk.cli._login_shell", return_value=shell
+        ), patch("sshdesk.cli.os.execv") as execv:
+            self.assertEqual(forced_command_main(), 0)
+        execv.assert_called_once_with(shell, [shell])
 
     def test_portable_forced_command_requires_pty_for_shell_selector(self) -> None:
         environment = {"SSH_ORIGINAL_COMMAND": "shell"}
@@ -192,6 +222,33 @@ class AgentTests(unittest.TestCase):
             run.call_args.args[0],
             ["/usr/bin/ssh", "alice@example.com", "sshdesk-agent", "session"],
         )
+        self.assertEqual(run.call_args.kwargs["timeout"], 30.0)
+
+    def test_remote_request_timeout_is_configurable(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout=b'{"ok":true}\n', stderr=b"")
+        with patch("sshdesk.client.shutil.which", return_value="/usr/bin/ssh"), patch(
+            "sshdesk.client.subprocess.run", return_value=completed
+        ) as run:
+            _remote_request(
+                "alice@example.com", {"id": 1, "action": "observe"}, timeout=120.0
+            )
+        self.assertEqual(run.call_args.kwargs["timeout"], 120.0)
+
+    def test_remote_reports_timeout_expiry_without_traceback(self) -> None:
+        stderr = io.StringIO()
+        with patch("sshdesk.client.shutil.which", return_value="/usr/bin/ssh"), patch(
+            "sshdesk.client.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=45),
+        ), redirect_stderr(stderr):
+            self.assertEqual(remote_entrypoint(["alice@example.com", "info"]), 1)
+        self.assertIn("timed out after 45 seconds", stderr.getvalue())
+
+    def test_remote_rejects_non_positive_timeout(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            remote_entrypoint(["alice@example.com", "--timeout", "0", "info"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--timeout must be a positive number of seconds", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ class TerminalCapabilities:
 
         mouse_override = env.get("SSHDESK_MOUSE", "auto").strip().lower()
         if mouse_override not in {"auto", "0", "1", "false", "true", "no", "yes"}:
-            raise RuntimeError("SSHDESK_MOUSE must be auto, 0, or 1")
+            raise RuntimeError("SSHDESK_MOUSE must be auto, 0/1, false/true, or no/yes")
         mouse = mouse_override not in {"0", "false", "no"}
         # SGR is understood by modern xterm-compatible emulators. When ignored,
         # terminals normally fall back to the legacy X10 report, which we parse too.
@@ -69,7 +69,7 @@ class TerminalCapabilities:
         )
         unicode_override = env.get("SSHDESK_UNICODE", "auto").strip().lower()
         if unicode_override not in {"auto", "0", "1", "false", "true", "no", "yes"}:
-            raise RuntimeError("SSHDESK_UNICODE must be auto, 0, or 1")
+            raise RuntimeError("SSHDESK_UNICODE must be auto, 0/1, false/true, or no/yes")
         if unicode_override in {"0", "false", "no"}:
             unicode = False
         elif unicode_override in {"1", "true", "yes"}:
