@@ -117,6 +117,9 @@ def server_entrypoint(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"sshdesk-server: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        # Cleanup still runs via the finally block; 130 mirrors shell SIGINT convention.
+        return 130
     finally:
         if input_backend is not None:
             input_backend.close()
