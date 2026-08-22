@@ -5,6 +5,7 @@ import os
 import subprocess
 import unittest
 from contextlib import redirect_stderr
+from pathlib import PurePath
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -109,6 +110,8 @@ class AgentTests(unittest.TestCase):
         shell = "C:/Windows/system32/cmd.exe"
         with patch.dict("os.environ", environment, clear=True), patch(
             "sshdesk.cli.os.name", "nt"
+        ), patch(
+            "sshdesk.cli.Path", PurePath
         ), patch(
             "sshdesk.cli._has_interactive_terminal", return_value=True
         ), patch(
