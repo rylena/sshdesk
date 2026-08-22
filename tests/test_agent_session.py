@@ -110,7 +110,7 @@ class ServerInterruptTests(unittest.TestCase):
             self.assertEqual(server_entrypoint([]), 130)
 
     def test_keyboard_interrupt_from_session_exits_cleanly(self) -> None:
-        with patch(
+        with patch.dict("os.environ", {"TERM": "xterm-256color"}), patch(
             "sshdesk.session.direct.DirectSession.run",
             side_effect=KeyboardInterrupt,
         ):

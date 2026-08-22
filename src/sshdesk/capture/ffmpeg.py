@@ -118,8 +118,9 @@ class FFmpegX11Capture:
         while offset < len(view):
             count = process.stdout.readinto(view[offset:])
             if not count:
-                detail = self._stderr_detail()
                 self._stop()
+                # Wait for the stderr drain thread before reading its retained tail.
+                detail = self._stderr_detail()
                 suffix = f": {detail}" if detail else ""
                 raise OSError(f"FFmpeg X11 capture stream ended{suffix}")
             offset += count
