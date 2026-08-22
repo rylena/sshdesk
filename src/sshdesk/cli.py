@@ -75,10 +75,14 @@ def _login_shell() -> str:
     return shell
 
 
+def _shell_arguments(shell: str) -> list[str]:
+    # cmd.exe and PowerShell have no login-shell mode; POSIX shells use -l.
+    return [shell] if os.name == "nt" else [shell, "-l"]
+
+
 def _exec_shell() -> int:
     shell = _login_shell()
-    arguments = [shell] if os.name == "nt" else [shell, "-l"]
-    os.execv(shell, arguments)
+    os.execv(shell, _shell_arguments(shell))
     return 0
 
 

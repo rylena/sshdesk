@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,7 +11,7 @@ from sshdesk.agent import (
     agent_ssh_entrypoint,
 )
 from sshdesk.capture.synthetic import SyntheticCapture
-from sshdesk.cli import forced_command_main
+from sshdesk.cli import _shell_arguments, forced_command_main
 from sshdesk.client import _remote_request, _split_arguments
 from sshdesk.input.base import InputBackend
 from sshdesk.input.events import KeyCode, KeyEvent, Modifiers
@@ -85,7 +86,29 @@ class AgentTests(unittest.TestCase):
             "sshdesk.cli.os.execv"
         ) as execv:
             self.assertEqual(forced_command_main(), 0)
-        execv.assert_called_once_with("/bin/bash", ["/bin/bash", "-l"])
+        arguments = ["/bin/bash"] if os.name == "nt" else ["/bin/bash", "-l"]
+        execv.assert_called_once_with("/bin/bash", arguments)
+
+    def test_login_shell_arguments_match_each_platform(self) -> None:
+        # Regression test for the Windows portable job: cmd.exe rejects -l.
+        with patch("sshdesk.cli.os.name", "posix"):
+            self.assertEqual(_shell_arguments("/bin/bash"), ["/bin/bash", "-l"])
+        with patch("sshdesk.cli.os.name", "nt"):
+            self.assertEqual(_shell_arguments("/bin/bash"), ["/bin/bash"])
+            self.assertEqual(_shell_arguments("cmd.exe"), ["cmd.exe"])
+
+    def test_windows_shell_selector_execs_without_login_flag(self) -> None:
+        environment = {"SSH_ORIGINAL_COMMAND": "shell"}
+        shell = "C:/Windows/system32/cmd.exe"
+        with patch.dict("os.environ", environment, clear=True), patch(
+            "sshdesk.cli.os.name", "nt"
+        ), patch(
+            "sshdesk.cli._has_interactive_terminal", return_value=True
+        ), patch(
+            "sshdesk.cli._login_shell", return_value=shell
+        ), patch("sshdesk.cli.os.execv") as execv:
+            self.assertEqual(forced_command_main(), 0)
+        execv.assert_called_once_with(shell, [shell])
 
     def test_portable_forced_command_requires_pty_for_shell_selector(self) -> None:
         environment = {"SSH_ORIGINAL_COMMAND": "shell"}
@@ -192,6 +215,7 @@ class AgentTests(unittest.TestCase):
             run.call_args.args[0],
             ["/usr/bin/ssh", "alice@example.com", "sshdesk-agent", "session"],
         )
+        self.assertEqual(run.call_args.kwargs["timeout"], 30.0)
 
 
 if __name__ == "__main__":
